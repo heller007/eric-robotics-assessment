@@ -11,7 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from common.config import load_yaml  # noqa: E402
 from data.balance import repeat_factors  # noqa: E402
-from detection.train import build_args, coerce  # noqa: E402
+from detection.train import (  # noqa: E402
+    WINDOWS_MAX_WORKERS,
+    build_args,
+    cap_windows_workers,
+    coerce,
+)
 
 
 def test_coerce_types():
@@ -67,6 +72,31 @@ def test_repeat_factors_leaves_background_frames_alone():
     per_image = {Path("bg.jpg"): set(), Path("cone.jpg"): {0}}
     repeats, _, _ = repeat_factors(per_image, threshold=0.5)
     assert repeats[Path("bg.jpg")] == 1
+
+
+def test_windows_worker_cap_respects_an_explicit_choice():
+    """Raising the pagefile is a valid alternative, so --set workers wins."""
+    args = {"workers": 8}
+    assert cap_windows_workers(args, ["workers=6"]) is None
+    assert args["workers"] == 8
+
+
+def test_windows_worker_cap_leaves_a_low_count_alone():
+    args = {"workers": 1}
+    assert cap_windows_workers(args, []) is None
+    assert args["workers"] == 1
+
+
+def test_windows_worker_cap_applies_or_not_by_platform():
+    import os
+
+    args = {"workers": 8}
+    note = cap_windows_workers(args, [])
+    if os.name == "nt":
+        assert args["workers"] == WINDOWS_MAX_WORKERS
+        assert note and "1455" in note
+    else:
+        assert args["workers"] == 8 and note is None
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ defaults:
   flipud: 0.0          # road scenes have a fixed up direction
   hsv_v: 0.4
   freeze: 10           # ~2,400 images overfits fast; unfreeze in a second stage
+  workers: 8            # capped to 2 on Windows by detection/train.py
   optimizer: auto
   seed: 0
   deterministic: true

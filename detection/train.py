@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from common.cli import friendly
@@ -72,6 +73,37 @@ def build_args(runs: dict, run: str, overrides: list[str]) -> tuple[dict, dict]:
     return spec, train_args
 
 
+WINDOWS_MAX_WORKERS = 2
+
+
+def cap_windows_workers(train_args: dict, overrides: list[str]) -> str | None:
+    """Keep the dataloader worker count low on Windows.
+
+    Windows has no fork, so every worker is a fresh process that re-imports
+    torch and reserves a large chunk of virtual address space with it. Eight of
+    them exhausts the pagefile and the run dies with WinError 1455 the moment
+    the workers spawn - usually right after the first epoch, when validation
+    starts. Two workers keep the image decoding off the main thread without
+    provoking it.
+
+    An explicit --set workers=N is always respected: raising the pagefile is a
+    legitimate alternative to capping this.
+    """
+    if os.name != "nt":
+        return None
+    if any(item.split("=", 1)[0].strip() == "workers" for item in overrides or []):
+        return None
+    current = train_args.get("workers")
+    if current is not None and current <= WINDOWS_MAX_WORKERS:
+        return None
+    train_args["workers"] = WINDOWS_MAX_WORKERS
+    return (
+        f"workers capped at {WINDOWS_MAX_WORKERS} on Windows "
+        "(more exhausts the pagefile: WinError 1455). "
+        "Override with --set workers=N once the pagefile is large enough."
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", required=True, help="B1, B1b, B2, B1u, B1bal ...")
@@ -89,6 +121,10 @@ def main() -> None:
             f"{args.run} is a no-fine-tune baseline. Score it directly:\n"
             f"  python -m eval.det_eval --run {args.run}"
         )
+
+    note = cap_windows_workers(train_args, args.set)
+    if note:
+        print(f"note: {note}")
 
     data_path = resolve(train_args["data"])
     if not Path(data_path).exists():
