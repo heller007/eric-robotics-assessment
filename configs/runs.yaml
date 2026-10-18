@@ -1,0 +1,67 @@
+# Training runs. `python -m detection.train --run B1` reads one entry; anything
+# here can be overridden on the command line with --set key=value.
+#
+# `models` is a preference list, not a single name: YOLO26 weights are new enough
+# that an older ultralytics install cannot fetch them, so the trainer falls back
+# to the next entry and records which one it actually used.
+
+defaults:
+  data: configs/data.yaml
+  epochs: 100
+  patience: 20
+  batch: -1            # largest batch that fits the GPU
+  imgsz: 640
+  cos_lr: true
+  close_mosaic: 10
+  mosaic: 1.0
+  scale: 0.5
+  fliplr: 0.5
+  flipud: 0.0          # road scenes have a fixed up direction
+  hsv_v: 0.4
+  freeze: 10           # ~2,400 images overfits fast; unfreeze in a second stage
+  optimizer: auto
+  seed: 0
+  deterministic: true
+  project: runs
+  plots: true
+  val: true
+
+runs:
+  B0:
+    purpose: "floor: COCO weights, no fine-tune. Detects stop signs only."
+    models: [yolo26n.pt, yolo11n.pt]
+    finetune: false
+    zero_shot: true     # predictions are remapped from the 80-class COCO order
+    imgsz: 640
+
+  B1:
+    purpose: "main deployable candidate"
+    models: [yolo26n.pt, yolo11n.pt]
+    imgsz: 640
+
+  B1b:
+    purpose: "same recipe, other family, for the latency pick"
+    models: [yolo11n.pt]
+    imgsz: 640
+
+  B2:
+    purpose: "accuracy ceiling and pseudo-label teacher"
+    models: [yolo26s.pt, yolo11s.pt]
+    imgsz: 960
+    batch: 8            # 960 px at batch=-1 tends to pick a batch that then OOMs
+
+  B1u:
+    purpose: "accuracy lever 5: unfreeze the backbone at a lower LR"
+    init_from: runs/B1/weights/best.pt
+    models: [yolo26n.pt, yolo11n.pt]
+    freeze: 0
+    epochs: 30
+    lr0: 0.002
+    mosaic: 0.5
+    imgsz: 640
+
+  B1bal:
+    purpose: "accuracy lever 4: class-balanced sampling (run data.balance first)"
+    models: [yolo26n.pt, yolo11n.pt]
+    data: configs/data_balanced.yaml
+    imgsz: 640

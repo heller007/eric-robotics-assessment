@@ -21,3 +21,6 @@ pandas>=2.0
 # onnxruntime>=1.18
 # openvino>=2024.3
 # torch-pruning>=1.4
+
+# dev
+pytest>=8.0

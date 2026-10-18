@@ -27,8 +27,8 @@ starts. Every task has one Kaggle notebook and one set of modules.
 | # | Task | Notebook | Modules | Status |
 | --- | --- | --- | --- | --- |
 | 1 | **Data pipeline** - nuScenes -> YOLO, COCO stop signs, pseudo-labels, merge, sanity checks | `notebooks/task1_data_pipeline.ipynb` | `data/` | done |
-| 2 | **Detection** - B0 zero-shot baseline, fine-tune B1 / B1b / B2, per-class eval | `notebooks/task2_detection.ipynb` | `detection/`, `eval/det_eval.py` | next |
-| 3 | **Distance** - fit priors, D0 pinhole, D1 ground plane, fusion, correction, eval by range bin | `notebooks/task3_distance.ipynb` | `distance/` , `eval/dist_eval.py` | planned |
+| 2 | **Detection** - B0 zero-shot baseline, fine-tune B1 / B1b / B2, per-class eval | `notebooks/task2_detection.ipynb` | `detection/`, `eval/det_eval.py` | done |
+| 3 | **Distance** - fit priors, D0 pinhole, D1 ground plane, fusion, correction, eval by range bin | `notebooks/task3_distance.ipynb` | `distance/` , `eval/dist_eval.py` | next |
 | 4 | **Edge optimisation** - ONNX / OpenVINO / TensorRT exports, INT8, pruning, benchmarks | `notebooks/task4_optimize.ipynb` | `optimize/`, `eval/benchmark.py` | planned |
 | 5 | **Integration** - threaded realtime app, ByteTrack + Kalman on Z, demo video, results tables | `notebooks/task5_integration.ipynb` | `app/`, `tracking/`, `results/` | planned |
 
@@ -56,7 +56,10 @@ Boxes are dropped when visibility is below level 2, when no lidar or radar point
 hits them, when any cuboid corner is behind the camera, or when the projection is
 under 4 px.
 
-### Task 2 - detection (next)
+### Task 2 - detection (done)
+
+Runs live in `configs/runs.yaml`; `python -m detection.train --run B1` reads one
+entry and anything in it can be overridden with `--set epochs=40`.
 
 | Run | Model | Size | Purpose |
 | --- | --- | --- | --- |
@@ -64,8 +67,31 @@ under 4 px.
 | B1 | `yolo26n` fine-tuned | 640 | main deployable candidate |
 | B1b | `yolo11n` fine-tuned | 640 | other family, for the latency pick |
 | B2 | `yolo26s` fine-tuned | 960 | accuracy ceiling and pseudo-label teacher |
+| B1bal | B1 + class-balanced sampling | 640 | accuracy lever 4 |
+| B1u | B1 continued, backbone unfrozen, lower LR | 640 | accuracy lever 5 |
 
-### Task 3 - distance
+**YOLO26 weights are requested, not assumed.** Each run lists its models in
+preference order and the trainer falls back to the next entry if the first cannot
+be fetched by the installed ultralytics, recording which one it actually used.
+
+**One evaluator for every variant.** `model.val()` cannot score B0: a
+COCO-pretrained model predicts 80 classes against this 3-class set, so the
+indices do not line up. Evaluating the baseline one way and the fine-tuned runs
+another would make the comparison meaningless, so `eval/det_eval.py` implements
+COCO-style AP once - greedy highest-IoU matching, one ground-truth box per
+prediction, a precision envelope sampled at 101 recall points with step
+interpolation - and runs everything through it, remapping zero-shot predictions
+from COCO's class order. `--cross-check` additionally prints `model.val()` for a
+fine-tuned model as a reference. The AP code is unit-tested against cases whose
+answer is known by hand (`tests/test_det_eval.py`).
+
+Beyond mAP it reports, per class, precision / recall / F1 at conf 0.25 (what a
+realtime pipeline would actually run at) and **recall split by ground-truth
+depth** (0-10, 10-20, 20-40, 40+ m). That last table is the one that shows
+whether far cones are being found at all, and it is what justifies spending
+compute on input size or a P2 head.
+
+### Task 3 - distance (next)
 
 - **D0, known size (pinhole):** `Z = f_y * H_eff / h_px`, and `Z = f_x * W / w_px`
   for stop signs, whose bottom is often cut off by the pole.
@@ -111,28 +137,51 @@ slug works.
 
 ```bash
 pip install -r requirements.txt
+
+# Task 1 - the whole data pipeline, or each step on its own
+python -m data.prepare --nuscenes-root /path/to/nuscenes
 python -m data.nuscenes_to_yolo --nuscenes-root /path/to/nuscenes --out datasets/yolo_3class
 python -m data.coco_stopsign --out datasets/yolo_3class
 python -m data.pseudo_label  --out datasets/yolo_3class --device 0
 python -m data.merge         --out datasets/yolo_3class
 python -m data.sanity_check  --out datasets/yolo_3class --draw 20
+
+# Task 2 - baseline, training, scoring
+python -m eval.det_eval  --run B0                                  # zero-shot floor
+python -m detection.train --run B1
+python -m eval.det_eval  --weights runs/B1/weights/best.pt --name B1 --cross-check
+python -m detection.infer --weights runs/B1/weights/best.pt --source datasets/yolo_3class/images/val --limit 8
 ```
 
-Paths, class order, camera constants and distance priors all live in `configs/`,
-so a run is reproducible from the command line.
+`data.prepare` skips what already exists, so re-running a notebook after a Kaggle
+session ends only rebuilds what it has to.
+
+Paths, class order, camera constants, training runs and distance priors all live
+in `configs/`, so a run is reproducible from the command line.
+
+### Tests
+
+The parts that are pure logic - the AP implementation, IoU, box matching, run-config
+merging, repeat-factor sampling - run without a GPU or a dataset:
+
+```bash
+python -m pytest tests -q
+```
 
 ## Repo layout
 
 ```
-configs/     paths.yaml, classes.yaml, camera.yaml, priors.yaml, data.yaml (generated)
-common/      config + environment discovery (local vs Kaggle)
-data/        nuscenes_to_yolo.py, coco_stopsign.py, pseudo_label.py, merge.py, sanity_check.py
+configs/     paths.yaml, classes.yaml, camera.yaml, priors.yaml, runs.yaml, data.yaml (generated)
+common/      config, environment discovery (local vs Kaggle), label loading, drawing
+data/        prepare.py, nuscenes_to_yolo.py, coco_stopsign.py, pseudo_label.py,
+             merge.py, balance.py, sanity_check.py
 detection/   train.py, infer.py
 distance/    pinhole.py, ground_plane.py, fusion.py, fit_priors.py, depth_model.py
 tracking/    kalman_z.py
 optimize/    export.py, prune.py
 eval/        det_eval.py, dist_eval.py, benchmark.py
 app/         realtime.py
+tests/       unit tests for the metric and config logic
 notebooks/   one per task
 results/     csv tables, plots, annotated frames
 ```
