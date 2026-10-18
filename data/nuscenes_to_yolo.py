@@ -38,6 +38,7 @@ CAMS = [
 IMG_W, IMG_H = 1600, 900
 MIN_BOX_PX = 4
 MIN_VISIBILITY = 2  # devkit levels 1..4; 2 means at least 40% visible
+DEDUP_COVER = 0.7   # drop a box this much inside a bigger one of the same class
 
 
 def camera_height_pitch(nusc, sample_data) -> tuple[float, float]:
@@ -58,6 +59,46 @@ def make_dirs(out: Path) -> None:
     for split in ("train", "val"):
         for sub in ("images", "labels", "meta"):
             (out / sub / split).mkdir(parents=True, exist_ok=True)
+
+
+def covered_fraction(inner: list[float], outer: list[float]) -> float:
+    """How much of `inner` lies inside `outer`, as a fraction of inner's area."""
+    ix1 = max(inner[0], outer[0])
+    iy1 = max(inner[1], outer[1])
+    ix2 = min(inner[2], outer[2])
+    iy2 = min(inner[3], outer[3])
+    overlap = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    own = max(1e-9, (inner[2] - inner[0]) * (inner[3] - inner[1]))
+    return overlap / own
+
+
+def suppress_covered(objects: list[dict], cover: float) -> tuple[list[dict], int]:
+    """Drop a box that sits almost entirely inside a larger box of its own class.
+
+    nuScenes annotates every barrier segment separately, so a row of them along
+    a roadside projects to a pile of near-identical boxes - twenty labels where a
+    detector can emit one. YOLO26 assigns one prediction per ground-truth box, so
+    those duplicates are not merely hard, they are contradictory, and the class
+    trains to nothing.
+
+    The largest box is kept, which is the nearest segment. Merging them instead
+    would span several depths and break the pixel-height-to-depth relationship
+    that Task 3 depends on; keeping one real box preserves it.
+    """
+    if cover <= 0 or len(objects) < 2:
+        return objects, 0
+    kept: list[dict] = []
+    for obj in sorted(
+        objects,
+        key=lambda o: -(o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]),
+    ):
+        if any(
+            obj["cls"] == k["cls"] and covered_fraction(obj["box"], k["box"]) > cover
+            for k in kept
+        ):
+            continue
+        kept.append(obj)
+    return kept, len(objects) - len(kept)
 
 
 def clear_previous(out: Path) -> int:
@@ -85,6 +126,7 @@ def convert(
     max_scenes: int | None = None,
     link_mode: str = "auto",
     val_scenes: list[str] | None = None,
+    dedup_cover: float = DEDUP_COVER,
 ) -> dict:
     from nuscenes.nuscenes import NuScenes
     from nuscenes.utils.geometry_utils import BoxVisibility, view_points
@@ -161,10 +203,6 @@ def convert(
                         continue
 
                     cls = cls_map[box.name]
-                    lines.append(
-                        f"{cls} {(x1 + x2) / 2 / IMG_W:.6f} {(y1 + y2) / 2 / IMG_H:.6f} "
-                        f"{(x2 - x1) / IMG_W:.6f} {(y2 - y1) / IMG_H:.6f}"
-                    )
                     meta_objs.append(
                         {
                             "cls": int(cls),
@@ -175,7 +213,17 @@ def convert(
                             "vis": vis,
                         }
                     )
-                    stats[split][cls] += 1
+                meta_objs, duplicates = suppress_covered(meta_objs, dedup_cover)
+                stats["dropped"]["duplicate_overlap"] += duplicates
+                lines = []
+                for obj in meta_objs:
+                    bx1, by1, bx2, by2 = obj["box"]
+                    lines.append(
+                        f"{obj['cls']} {(bx1 + bx2) / 2 / IMG_W:.6f} "
+                        f"{(by1 + by2) / 2 / IMG_H:.6f} "
+                        f"{(bx2 - bx1) / IMG_W:.6f} {(by2 - by1) / IMG_H:.6f}"
+                    )
+                    stats[split][obj["cls"]] += 1
 
                 src = Path(img_path)
                 stem = src.stem
@@ -235,6 +283,13 @@ def main() -> None:
         "configs/paths.yaml; the devkit's mini_val contains no barriers.",
     )
     ap.add_argument(
+        "--dedup-cover",
+        type=float,
+        default=DEDUP_COVER,
+        help="drop a box with more than this fraction of itself inside a larger "
+        "box of the same class; 0 keeps every annotation",
+    )
+    ap.add_argument(
         "--link-mode",
         choices=list(LINK_ORDER),
         default="auto",
@@ -251,7 +306,14 @@ def main() -> None:
     print(f"nuScenes root : {root}")
     print(f"output        : {out}")
     stats = convert(
-        root, out, args.version, args.cams, args.max_scenes, args.link_mode, val_scenes
+        root,
+        out,
+        args.version,
+        args.cams,
+        args.max_scenes,
+        args.link_mode,
+        val_scenes,
+        args.dedup_cover,
     )
     print(summarise(stats))
 
