@@ -15,3 +15,12 @@ out_root: datasets/yolo_3class
 
 # Where training runs / exported engines land
 runs_root: runs
+
+# ---------------------------------------------------------------- Task 1 output
+# The prepared 3-class YOLO dataset. Task 1 is already done and published, so
+# later tasks fetch this instead of rebuilding from nuScenes + COCO.
+#
+# Resolution order: --dataset-root, ERIC_DATASET_ROOT, /kaggle/input,
+# out_root above, then kaggle_dataset below.
+dataset_root: null
+kaggle_dataset: pandeyvineet/eric-cones-stops-barriers

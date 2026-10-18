@@ -21,3 +21,9 @@ __pycache__/
 venv/
 .env
 .DS_Store
+
+# per-machine and generated configs: absolute paths differ per machine, so
+# committing them only creates conflicts between the two PCs
+configs/local.yaml
+configs/data.yaml
+configs/data_balanced.yaml

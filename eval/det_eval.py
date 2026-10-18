@@ -23,8 +23,9 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
+from common.cli import friendly
 from common.config import class_names, load_yaml, resolve
-from common.env import writable_root
+from common.env import dataset_root_for_cli
 from common.labels import iou_matrix, load_split
 
 IOU_THRS = np.arange(0.5, 0.96, 0.05)
@@ -283,19 +284,18 @@ def main() -> None:
     ap.add_argument("--weights", default=None, help="a .pt/.engine/.onnx, or omit with --run")
     ap.add_argument("--run", default=None, help="an entry in configs/runs.yaml, e.g. B0")
     ap.add_argument("--name", default=None, help="label for the results row")
-    ap.add_argument("--out", default=None, help="dataset root")
+    ap.add_argument("--out", "--dataset-root", dest="out", default=None, help="dataset root")
     ap.add_argument("--split", default="val")
     ap.add_argument("--imgsz", type=int, default=None)
     ap.add_argument("--conf", type=float, default=0.001, help="low, so AP sees the tail")
-    ap.add_argument("--device", default=0)
+    ap.add_argument("--device", default="", help="blank = auto (CUDA if present)")
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--cross-check", action="store_true", help="also run model.val()")
     ap.add_argument("--results", default="results")
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
     runs = load_yaml("runs.yaml")
-    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    out = dataset_root_for_cli(args.out)
     names = class_names()
 
     class_map = None
@@ -358,4 +358,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

@@ -19,8 +19,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common.config import REPO_ROOT, load_yaml, resolve
-from common.env import find_coco_root, find_nuscenes_root, writable_root
+from common.cli import friendly
+from common.config import REPO_ROOT, load_paths, resolve
+from common.env import (
+    find_coco_root,
+    find_dataset_root,
+    find_nuscenes_root,
+    writable_root,
+)
 
 
 def step(label: str, cmd: list[str]) -> None:
@@ -38,22 +44,37 @@ def already_built(out: Path) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", "--dataset-root", dest="out", default=None)
     ap.add_argument("--nuscenes-root", default=None)
     ap.add_argument("--coco-root", default=None)
     ap.add_argument("--force", action="store_true", help="rebuild even if present")
     ap.add_argument("--no-pseudo", action="store_true", help="skip pseudo-labelling")
     ap.add_argument("--no-coco", action="store_true", help="skip the stop sign source")
-    ap.add_argument("--device", default=0)
+    ap.add_argument("--device", default="", help="blank = auto (CUDA if present)")
     ap.add_argument("--pseudo-weights", default="yolo11n.pt")
     ap.add_argument("--draw", type=int, default=12)
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
-    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    paths = load_paths()
     py = [sys.executable, "-m"]
 
-    if already_built(out) and not args.force:
+    # Task 1 may already be done - built here earlier, or downloaded with
+    # data.fetch_dataset. Only fall through to rebuilding when it is not.
+    existing = None
+    if not args.force:
+        try:
+            existing = find_dataset_root(
+                args.out or paths.get("dataset_root"),
+                kaggle_slug=None,  # fetching is data.fetch_dataset's job, not this one
+                allow_download=False,
+                local_default=writable_root() / paths["out_root"],
+            )
+        except FileNotFoundError:
+            existing = None
+
+    out = existing or (resolve(args.out) if args.out else writable_root() / paths["out_root"])
+
+    if existing:
         print(f"dataset already present at {out} - validating only (use --force to rebuild)")
     else:
         nuscenes = find_nuscenes_root(args.nuscenes_root or paths.get("nuscenes_root"))
@@ -94,4 +115,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

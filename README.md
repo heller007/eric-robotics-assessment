@@ -34,6 +34,10 @@ starts. Every task has one Kaggle notebook and one set of modules.
 
 ### Task 1 - data pipeline (done)
 
+Output published as the Kaggle dataset
+`pandeyvineet/eric-cones-stops-barriers`; `python -m data.fetch_dataset` pulls it
+onto a machine, so nothing downstream needs nuScenes or the devkit.
+
 Builds one 3-class YOLO set: **0 cone, 1 barrier, 2 stop_sign**.
 
 | Source | Classes | Role |
@@ -121,41 +125,92 @@ speed plot with the 30 FPS line marked, and the demo video.
 
 ## Running it
 
-### On Kaggle (the intended path)
+Work happens in a local checkout; **git carries the code, not the data**. The
+dataset is a published Kaggle dataset and the weights are git-ignored, so each
+machine fetches or copies those separately.
 
-Open the task's notebook on Kaggle, or create a notebook and paste the first cell:
-
-```python
-!git clone --depth 1 https://github.com/heller007/eric-robotics-assessment.git /kaggle/working/eric-robotics-assessment
-```
-
-Per notebook: set the accelerator to GPU, turn Internet on, and attach a
-**nuScenes v1.0-mini** dataset (plus **COCO 2017** if you want to skip the
-stop-sign download). The dataset roots are found by folder layout, so any mirror
-slug works.
-
-### Locally
+### First time on a machine
 
 ```bash
-pip install -r requirements.txt
-
-# Task 1 - the whole data pipeline, or each step on its own
-python -m data.prepare --nuscenes-root /path/to/nuscenes
-python -m data.nuscenes_to_yolo --nuscenes-root /path/to/nuscenes --out datasets/yolo_3class
-python -m data.coco_stopsign --out datasets/yolo_3class
-python -m data.pseudo_label  --out datasets/yolo_3class --device 0
-python -m data.merge         --out datasets/yolo_3class
-python -m data.sanity_check  --out datasets/yolo_3class --draw 20
-
-# Task 2 - baseline, training, scoring
-python -m eval.det_eval  --run B0                                  # zero-shot floor
-python -m detection.train --run B1
-python -m eval.det_eval  --weights runs/B1/weights/best.pt --name B1 --cross-check
-python -m detection.infer --weights runs/B1/weights/best.pt --source datasets/yolo_3class/images/val --limit 8
+git clone https://github.com/heller007/eric-robotics-assessment.git
+cd eric-robotics-assessment
 ```
 
-`data.prepare` skips what already exists, so re-running a notebook after a Kaggle
-session ends only rebuilds what it has to.
+Install a CUDA build of torch *before* the requirements, or pip will give you the
+CPU-only wheel and training will crawl (pick the index URL for your CUDA version
+from pytorch.org):
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt
+```
+
+Then check the machine and pull the dataset:
+
+```bash
+python -m common.doctor          # python, GPU, packages, dataset, weights
+python -m data.fetch_dataset     # downloads pandeyvineet/eric-cones-stops-barriers
+```
+
+`doctor` is the first thing to run when something looks wrong - it says whether
+torch sees a GPU, which optional packages are absent, and whether the dataset has
+been located. `fetch_dataset` downloads through kagglehub (which caches), checks
+the tree actually contains images, labels **and** the `meta/` sidecars Task 3
+needs, writes `configs/data.yaml`, and records the location in
+`configs/local.yaml`.
+
+A private Kaggle dataset needs credentials on the machine: `kaggle.json` in
+`~/.kaggle/` (Windows: `%USERPROFILE%\.kaggle\`), or `KAGGLE_USERNAME` and
+`KAGGLE_KEY` in the environment. Already have a copy on disk? Skip the download
+with `python -m data.fetch_dataset --dataset-root D:/path/to/it`.
+
+### Working across two machines
+
+| Travels through git | Does not |
+| --- | --- |
+| everything in `configs/` except `local.yaml` and the generated `data*.yaml` | the dataset (Kaggle dataset) |
+| all code, notebooks, tests, README | `runs/` and any `.pt` / `.engine` / `.onnx` |
+| `results/` tables and plots | `datasets/`, `configs/local.yaml` |
+
+So the loop is: commit and push on one machine, `git pull` on the other, and
+`python -m data.fetch_dataset` once per machine. Absolute paths never get
+committed - `configs/data.yaml` is generated per machine and git-ignored, which is
+why both PCs can keep the dataset in different places.
+
+To move trained weights across, copy `runs/<run>/weights/best.pt` by hand (or
+publish it as its own Kaggle dataset). Nothing in the pipeline assumes they are
+in git.
+
+### Task 2 - detection
+
+```bash
+python -m eval.det_eval   --run B0                                   # zero-shot floor
+python -m detection.train --run B1
+python -m eval.det_eval   --weights runs/B1/weights/best.pt --name B1 --cross-check
+python -m detection.infer --weights runs/B1/weights/best.pt --source <dataset>/images/val --limit 8
+```
+
+Any run in `configs/runs.yaml` works the same way, and `--set key=value` overrides
+one knob: `python -m detection.train --run B2 --set epochs=60`. `--device` is
+blank by default, meaning CUDA when it is there and CPU when it is not.
+
+### Task 1 - rebuilding the dataset (not normally needed)
+
+Task 1 is done; its output is the Kaggle dataset above. To change the conversion
+and rebuild it from the raw sources:
+
+```bash
+python -m data.prepare --nuscenes-root /path/to/nuscenes --force
+# or step by step
+python -m data.nuscenes_to_yolo --nuscenes-root /path/to/nuscenes --out datasets/yolo_3class
+python -m data.coco_stopsign --out datasets/yolo_3class
+python -m data.pseudo_label  --out datasets/yolo_3class
+python -m data.merge         --out datasets/yolo_3class
+python -m data.sanity_check  --out datasets/yolo_3class --draw 20
+```
+
+Without `--force`, `data.prepare` finds the dataset that is already there and only
+re-validates it.
 
 Paths, class order, camera constants, training runs and distance priors all live
 in `configs/`, so a run is reproducible from the command line.
@@ -172,10 +227,11 @@ python -m pytest tests -q
 ## Repo layout
 
 ```
-configs/     paths.yaml, classes.yaml, camera.yaml, priors.yaml, runs.yaml, data.yaml (generated)
-common/      config, environment discovery (local vs Kaggle), label loading, drawing
-data/        prepare.py, nuscenes_to_yolo.py, coco_stopsign.py, pseudo_label.py,
-             merge.py, balance.py, sanity_check.py
+configs/     paths.yaml, classes.yaml, camera.yaml, priors.yaml, runs.yaml
+             local.yaml + data.yaml are per-machine and git-ignored
+common/      config, dataset discovery, doctor, label loading, drawing
+data/        fetch_dataset.py, prepare.py, nuscenes_to_yolo.py, coco_stopsign.py,
+             pseudo_label.py, merge.py, balance.py, sanity_check.py
 detection/   train.py, infer.py
 distance/    pinhole.py, ground_plane.py, fusion.py, fit_priors.py, depth_model.py
 tracking/    kalman_z.py

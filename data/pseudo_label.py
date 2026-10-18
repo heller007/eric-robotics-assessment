@@ -19,8 +19,9 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from common.cli import friendly
 from common.config import load_yaml, resolve
-from common.env import writable_root
+from common.env import dataset_root_for_cli
 
 STOP_SIGN_CLASS = 2
 
@@ -147,18 +148,17 @@ def save_review_sheet(crops: list[tuple[Path, list[float]]], review_dir: Path) -
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", "--dataset-root", dest="out", default=None)
     ap.add_argument("--weights", default="yolo11n.pt", help="any COCO-pretrained YOLO")
     ap.add_argument("--conf", type=float, default=0.5)
     ap.add_argument("--imgsz", type=int, default=960)
-    ap.add_argument("--device", default=0)
+    ap.add_argument("--device", default="", help="blank = auto (CUDA if present)")
     ap.add_argument("--splits", nargs="*", default=["train", "val"])
     ap.add_argument("--review", type=int, default=30, help="crops in the contact sheet")
     ap.add_argument("--review-dir", default="results")
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
-    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    out = dataset_root_for_cli(args.out, allow_download=False)
     run(
         out,
         args.weights,
@@ -172,4 +172,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

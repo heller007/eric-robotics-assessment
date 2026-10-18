@@ -16,8 +16,9 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from common.config import class_names, load_yaml, resolve
-from common.env import writable_root
+from common.cli import friendly
+from common.config import class_names, resolve
+from common.env import dataset_root_for_cli
 
 COLORS = [(0, 165, 255), (255, 128, 0), (0, 0, 255)]  # BGR: cone, barrier, stop sign
 IMG_EXT = (".jpg", ".jpeg", ".png")
@@ -136,15 +137,14 @@ def check_meta(out: Path, splits: list[str]) -> list[str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", "--dataset-root", dest="out", default=None)
     ap.add_argument("--draw", type=int, default=20)
     ap.add_argument("--dest", default="results/sanity")
     ap.add_argument("--splits", nargs="*", default=["train", "val"])
     ap.add_argument("--strict", action="store_true")
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
-    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    out = dataset_root_for_cli(args.out)
     dest = resolve(args.dest)
 
     from data.merge import scan_split
@@ -176,4 +176,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

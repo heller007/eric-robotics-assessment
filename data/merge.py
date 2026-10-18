@@ -13,8 +13,9 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from common.config import REPO_ROOT, class_names, load_yaml, resolve, save_yaml
-from common.env import writable_root
+from common.cli import friendly
+from common.config import REPO_ROOT, class_names, load_paths, resolve, save_yaml
+from common.env import find_dataset_root, writable_root
 
 IMG_EXT = (".jpg", ".jpeg", ".png")
 
@@ -64,10 +65,17 @@ def scan_split(out: Path, split: str) -> dict:
 
 
 def write_data_yaml(out: Path, names: list[str], dest: Path) -> Path:
+    """Absolute split paths, so the yaml works regardless of where it is read from.
+
+    The dataset can sit in a kagglehub cache on one machine and on a data drive on
+    another; `path` plus relative splits would make the file machine-specific, and
+    it is git-ignored for the same reason.
+    """
+    out = Path(out).resolve()
     cfg = {
         "path": str(out).replace("\\", "/"),
-        "train": "images/train",
-        "val": "images/val",
+        "train": str(out / "images" / "train").replace("\\", "/"),
+        "val": str(out / "images" / "val").replace("\\", "/"),
         "names": {i: n for i, n in enumerate(names)},
     }
     return save_yaml(cfg, dest)
@@ -75,8 +83,9 @@ def write_data_yaml(out: Path, names: list[str], dest: Path) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", "--dataset-root", dest="out", default=None)
     ap.add_argument("--data-yaml", default=str(REPO_ROOT / "configs" / "data.yaml"))
+    ap.add_argument("--results", default="results")
     ap.add_argument(
         "--strict",
         action="store_true",
@@ -84,8 +93,12 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
-    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    paths = load_paths()
+    out = find_dataset_root(
+        args.out or paths.get("dataset_root"),
+        paths.get("kaggle_dataset"),
+        local_default=writable_root() / paths["out_root"],
+    )
     names = class_names()
 
     report = {}
@@ -120,7 +133,13 @@ def main() -> None:
 
     dest = write_data_yaml(out, names, Path(args.data_yaml))
     print(f"wrote {dest}")
-    (out / "merge_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    # the report goes to results/, never into the dataset: a downloaded one may
+    # live in a cache directory that gets cleared
+    results_dir = resolve(args.results)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / "merge_report.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
 
     if problems:
         print("\nproblems:")
@@ -133,4 +152,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

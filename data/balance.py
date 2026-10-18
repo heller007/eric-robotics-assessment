@@ -22,8 +22,9 @@ import math
 from collections import Counter
 from pathlib import Path
 
-from common.config import REPO_ROOT, class_names, load_yaml, resolve, save_yaml
-from common.env import writable_root
+from common.cli import friendly
+from common.config import REPO_ROOT, class_names, resolve, save_yaml
+from common.env import dataset_root_for_cli
 from common.labels import list_images
 
 
@@ -74,15 +75,20 @@ def repeat_factors(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default=None, help="dataset root")
+    ap.add_argument("--out", "--dataset-root", dest="out", default=None, help="dataset root")
     ap.add_argument("--split", default="train")
     ap.add_argument("--threshold", type=float, default=0.5, help="target class frequency t")
     ap.add_argument("--list-name", default="train_balanced.txt")
+    ap.add_argument(
+        "--list-dir",
+        default="datasets",
+        help="where the repeated-image list is written; never the dataset itself, "
+        "which may be a read-only cache",
+    )
     ap.add_argument("--data-yaml", default=str(REPO_ROOT / "configs" / "data_balanced.yaml"))
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
-    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    out = dataset_root_for_cli(args.out)
     names = class_names()
 
     per_image = image_classes(out, args.split)
@@ -94,14 +100,16 @@ def main() -> None:
     after = Counter()
     lines = []
     for img, times in repeats.items():
-        lines.extend([str(img).replace("\\", "/")] * times)
+        lines.extend([str(img.resolve()).replace("\\", "/")] * times)
         lbl = out / "labels" / args.split / f"{img.stem}.txt"
         if lbl.exists():
             for line in lbl.read_text(encoding="utf-8").splitlines():
                 if line.strip():
                     after[int(line.split()[0])] += times
 
-    list_path = out / args.list_name
+    list_dir = resolve(args.list_dir)
+    list_dir.mkdir(parents=True, exist_ok=True)
+    list_path = list_dir / args.list_name
     list_path.write_text("\n".join(lines), encoding="utf-8")
 
     print(f"{len(per_image)} images -> {len(lines)} entries per epoch")
@@ -111,10 +119,11 @@ def main() -> None:
             f"instances {before.get(c, 0):>6} -> {after.get(c, 0):>6}"
         )
 
+    # absolute everywhere: the list lives in the repo, the images in the dataset
     cfg = {
-        "path": str(out).replace("\\", "/"),
-        "train": args.list_name,
-        "val": "images/val",
+        "path": str(Path(out).resolve()).replace("\\", "/"),
+        "train": str(list_path.resolve()).replace("\\", "/"),
+        "val": str((Path(out) / "images" / "val").resolve()).replace("\\", "/"),
         "names": {i: n for i, n in enumerate(names)},
     }
     dest = save_yaml(cfg, Path(args.data_yaml))
@@ -122,4 +131,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

@@ -25,6 +25,7 @@ from pathlib import Path
 import requests
 from tqdm import tqdm
 
+from common.cli import friendly
 from common.config import load_yaml, resolve
 from common.env import find_coco_root, writable_root
 
@@ -210,4 +211,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

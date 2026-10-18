@@ -17,6 +17,7 @@ import argparse
 import json
 from pathlib import Path
 
+from common.cli import friendly
 from common.config import load_yaml, resolve
 
 # keys that configure this script rather than ultralytics
@@ -149,4 +150,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

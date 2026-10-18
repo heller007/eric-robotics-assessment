@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from common.cli import friendly
 from common.config import class_names, resolve
 from common.draw import draw_detections, draw_hud
 from common.labels import list_images
@@ -88,7 +89,7 @@ def main() -> None:
     ap.add_argument("--save-video", default=None)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--conf", type=float, default=0.25)
-    ap.add_argument("--device", default=0)
+    ap.add_argument("--device", default="", help="blank = auto (CUDA if present)")
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
 
@@ -115,4 +116,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()

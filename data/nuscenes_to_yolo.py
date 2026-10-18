@@ -23,6 +23,7 @@ import numpy as np
 from pyquaternion import Quaternion
 from tqdm import tqdm
 
+from common.cli import friendly
 from common.config import load_yaml, resolve
 from common.env import find_nuscenes_root, writable_root
 
@@ -233,4 +234,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    friendly(main)()
