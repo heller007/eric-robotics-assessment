@@ -73,18 +73,19 @@ def build_args(runs: dict, run: str, overrides: list[str]) -> tuple[dict, dict]:
     return spec, train_args
 
 
-WINDOWS_MAX_WORKERS = 2
+WINDOWS_MAX_WORKERS = 6
 
 
 def cap_windows_workers(train_args: dict, overrides: list[str]) -> str | None:
     """Keep the dataloader worker count low on Windows.
 
     Windows has no fork, so every worker is a fresh process that re-imports
-    torch and reserves a large chunk of virtual address space with it. Eight of
+    torch and reserves a large chunk of virtual address space with it. Enough of
     them exhausts the pagefile and the run dies with WinError 1455 the moment
     the workers spawn - usually right after the first epoch, when validation
-    starts. Two workers keep the image decoding off the main thread without
-    provoking it.
+    starts. The default of 8 did exactly that on a 1600x900 dataset; this ceiling
+    is the agreed working value, and it assumes the pagefile has been raised. Drop
+    it to 2 if WinError 1455 comes back.
 
     An explicit --set workers=N is always respected: raising the pagefile is a
     legitimate alternative to capping this.
