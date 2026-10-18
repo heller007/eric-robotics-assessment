@@ -13,7 +13,8 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from collections import defaultdict
+import statistics
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from common.cli import friendly
@@ -93,6 +94,26 @@ def draw_samples(out: Path, split: str, n: int, dest: Path, seed: int = 0) -> in
     return drawn
 
 
+def scene_counts(out: Path, splits: list[str]) -> dict[str, Counter]:
+    """Per-class box counts per scene, straight from the meta sidecars.
+
+    This is what tells you which scenes to hold out: the devkit's mini_val has no
+    barriers, so barrier AP cannot be measured on it.
+    """
+    counts: dict[str, Counter] = defaultdict(Counter)
+    for split in splits:
+        meta_dir = out / "meta" / split
+        if not meta_dir.is_dir():
+            continue
+        for meta_path in meta_dir.glob("*.json"):
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            key = f"{meta['scene']} ({split})"
+            for obj in meta["objects"]:
+                counts[key][obj["cls"]] += 1
+            counts[key]["images"] += 1
+    return counts
+
+
 def check_meta(out: Path, splits: list[str]) -> list[str]:
     problems = []
     per_camera_fx: dict[str, set] = defaultdict(set)
@@ -115,14 +136,19 @@ def check_meta(out: Path, splits: list[str]) -> list[str]:
                     problems.append(f"{meta_path.name}: non-positive Z {obj['z']}")
                 seen_depths.append(obj["z"])
 
-    distinct_fx = {next(iter(v)) for v in per_camera_fx.values() if len(v) == 1}
-    if per_camera_fx and len(distinct_fx) < 2:
+    # Each camera has its own focal length, and that is what we are checking: the
+    # back camera is a wider lens than the front ones. Within one camera, fx also
+    # varies a little between scenes, because nuScenes-mini spans several logs
+    # and each was calibrated separately - that is real calibration data, not a
+    # conversion bug, so it is reported rather than flagged.
+    medians = {cam: statistics.median(sorted(v)) for cam, v in per_camera_fx.items()}
+    if len(medians) > 1 and len({round(m) for m in medians.values()}) < 2:
         problems.append(
-            "every camera reports the same fx - K is probably not per-camera"
+            "every camera reports the same fx - K is probably not being read per camera"
         )
-    for cam, fxs in per_camera_fx.items():
-        if len(fxs) > 1:
-            problems.append(f"{cam}: fx varies within the camera ({sorted(fxs)[:3]}...)")
+    for cam in sorted(medians):
+        spread = max(per_camera_fx[cam]) - min(per_camera_fx[cam])
+        print(f"  {cam:<16} fx median {medians[cam]:8.1f}  spread across logs {spread:5.1f} px")
 
     if seen_depths:
         seen_depths.sort()
@@ -131,7 +157,6 @@ def check_meta(out: Path, splits: list[str]) -> list[str]:
             f"depth: {len(seen_depths)} boxes, min {seen_depths[0]:.1f} m, "
             f"median {mid:.1f} m, max {seen_depths[-1]:.1f} m"
         )
-    print(f"cameras seen: {', '.join(sorted(per_camera_fx))}")
     return problems
 
 
@@ -158,6 +183,19 @@ def main() -> None:
         for c in range(len(names)):
             if info["counts"].get(c, 0) == 0:
                 problems.append(f"{split}: zero {names[c]} instances")
+
+    per_scene = scene_counts(out, args.splits)
+    if per_scene:
+        print("\nper scene (nuScenes only):")
+        for scene in sorted(per_scene):
+            c = per_scene[scene]
+            shown = "  ".join(f"{names[i]}={c.get(i, 0)}" for i in range(len(names)))
+            print(f"  {scene:<24} {c['images']:>4} images   {shown}")
+        if any("zero" in p for p in problems):
+            print(
+                "\nA class is absent from val. Re-run the converter with "
+                "--val-scenes <names from above> so every class appears in both."
+            )
 
     problems += check_meta(out, args.splits)
 

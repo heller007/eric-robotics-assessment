@@ -67,6 +67,7 @@ def convert(
     cams: list[str] | None = None,
     max_scenes: int | None = None,
     link_mode: str = "auto",
+    val_scenes: list[str] | None = None,
 ) -> dict:
     from nuscenes.nuscenes import NuScenes
     from nuscenes.utils.geometry_utils import BoxVisibility, view_points
@@ -77,7 +78,9 @@ def convert(
     make_dirs(out)
 
     nusc = NuScenes(version=version, dataroot=str(dataroot), verbose=False)
-    val_scenes = set(create_splits_scenes()["mini_val"])
+    # The devkit's mini_val holds no barriers at all, so it cannot measure
+    # barrier AP; --val-scenes picks a different hold-out when that matters.
+    val_scenes = set(val_scenes or create_splits_scenes()["mini_val"])
 
     stats = {
         "train": Counter(),
@@ -205,6 +208,13 @@ def main() -> None:
     ap.add_argument("--cams", nargs="*", default=None, help="default: all 6")
     ap.add_argument("--max-scenes", type=int, default=None, help="smoke test")
     ap.add_argument(
+        "--val-scenes",
+        nargs="*",
+        default=None,
+        help="scene names to hold out, e.g. scene-0061 scene-0103. Default is the "
+        "devkit's mini_val, which contains no barriers.",
+    )
+    ap.add_argument(
         "--link-mode",
         choices=list(LINK_ORDER),
         default="auto",
@@ -219,7 +229,9 @@ def main() -> None:
 
     print(f"nuScenes root : {root}")
     print(f"output        : {out}")
-    stats = convert(root, out, args.version, args.cams, args.max_scenes, args.link_mode)
+    stats = convert(
+        root, out, args.version, args.cams, args.max_scenes, args.link_mode, args.val_scenes
+    )
     print(summarise(stats))
 
     report = out / "nuscenes_stats.json"

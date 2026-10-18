@@ -78,6 +78,9 @@ def main() -> None:
     )
     ap.add_argument("--cams", nargs="*", default=None, help="restrict to these cameras")
     ap.add_argument(
+        "--val-scenes", nargs="*", default=None, help="scene names to hold out as val"
+    )
+    ap.add_argument(
         "--no-save",
         action="store_true",
         help="do not record --nuscenes-root in configs/local.yaml",
@@ -135,7 +138,8 @@ def main() -> None:
                 "--link-mode",
                 args.link_mode,
             ]
-            + (["--cams", *args.cams] if args.cams else []),
+            + (["--cams", *args.cams] if args.cams else [])
+            + (["--val-scenes", *args.val_scenes] if args.val_scenes else []),
         )
         if not args.no_coco:
             coco = find_coco_root(args.coco_root or paths.get("coco_root"))
