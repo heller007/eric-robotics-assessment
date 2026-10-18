@@ -20,7 +20,7 @@ from pathlib import Path
 from common.config import load_yaml, resolve
 
 # keys that configure this script rather than ultralytics
-META_KEYS = {"purpose", "models", "finetune", "zero_shot", "init_from"}
+META_KEYS = {"purpose", "models", "finetune", "zero_shot", "init_from", "load_from"}
 
 
 def resolve_weights(candidates: list[str] | str) -> str:
@@ -120,6 +120,13 @@ def main() -> None:
     from ultralytics import YOLO
 
     model = YOLO(weights)
+    if spec.get("load_from"):
+        # Building from a .yaml gives random weights. .load() transfers every
+        # tensor whose name and shape still match, which is how a P2 run reuses
+        # the pretrained backbone it does share with the stock architecture; the
+        # new stride-4 head necessarily starts cold.
+        print(f"transferring matching weights from {spec['load_from']}")
+        model = model.load(spec["load_from"])
     results = model.train(**train_args)
 
     save_dir = Path(getattr(results, "save_dir", train_args["project"]))

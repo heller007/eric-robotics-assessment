@@ -65,3 +65,15 @@ runs:
     models: [yolo26n.pt, yolo11n.pt]
     data: configs/data_balanced.yaml
     imgsz: 640
+
+  B1p2:
+    purpose: "accuracy lever 3: extra stride-4 head for 10-20 px cones"
+    # Built from an architecture yaml, so there is no matching checkpoint to
+    # download: load_from transfers the weights the two do share and the new
+    # head trains from scratch. Expect it to need the full epoch budget, and
+    # costs compute at every stride-4 pixel - only worth it if the by-range
+    # recall from eval.det_eval says far cones are being missed.
+    models: [yolo11-p2.yaml, yolov8-p2.yaml]
+    load_from: yolo11n.pt
+    freeze: 0
+    imgsz: 640

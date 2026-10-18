@@ -69,6 +69,7 @@ entry and anything in it can be overridden with `--set epochs=40`.
 | B2 | `yolo26s` fine-tuned | 960 | accuracy ceiling and pseudo-label teacher |
 | B1bal | B1 + class-balanced sampling | 640 | accuracy lever 4 |
 | B1u | B1 continued, backbone unfrozen, lower LR | 640 | accuracy lever 5 |
+| B1p2 | extra stride-4 head | 640 | accuracy lever 3, for 10-20 px cones |
 
 **YOLO26 weights are requested, not assumed.** Each run lists its models in
 preference order and the trainer falls back to the next entry if the first cannot
