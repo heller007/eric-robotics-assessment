@@ -186,7 +186,10 @@ def main() -> None:
 
     per_scene = scene_counts(out, args.splits)
     if per_scene:
-        print("\nper scene (nuScenes only):")
+        # The stop_sign column is always zero here and that is not a fault: this
+        # table comes from the meta sidecars, which hold nuScenes 3D annotations
+        # only, while pseudo-labelled stop signs are written to the label files.
+        print("\nper scene, from the meta sidecars (cones and barriers only):")
         for scene in sorted(per_scene):
             c = per_scene[scene]
             shown = "  ".join(f"{names[i]}={c.get(i, 0)}" for i in range(len(names)))
