@@ -56,6 +56,22 @@ Three details that decide whether the rest works:
   truncation and visibility - Task 3 needs all of it, and recovering it later
   means re-running the devkit.
 
+**A row of barriers is one label, not six.** nuScenes annotates every barrier
+segment separately, so a roadside row projects to five or six boxes standing
+side by side. In the image that row is one continuous object and a detector
+predicts one box for it - the right answer, scored as five misses. Trained
+against the raw labels, barrier AP50 was 0.000 with zero recall in every range
+bin, on more training instances than cones: YOLO26 is NMS-free and assigns one
+prediction per ground-truth box, so the duplicates are contradictory targets
+rather than hard ones. The converter merges overlapping barrier boxes into one
+per visual structure and keeps the nearest segment's depth, which is also the
+useful quantity ("a barrier starts 9 m ahead"). The merged box's bottom edge is
+still that segment's contact point, so the ground-plane distance estimate stays
+exact; the pinhole estimate reads slightly tall because the top edge comes from
+the far end of the row, and that bias is what fitting `H_eff` absorbs. Every
+segment's depth is kept in the sidecar. Cones are never merged - they are
+discrete objects.
+
 **The val split is not the devkit's.** `mini_val` (scene-0103, scene-0916)
 contains no barrier annotations at all, so barrier AP is unmeasurable on it -
 and "beat the zero-shot baseline on every class" then cannot be reported.

@@ -10,7 +10,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
-    from data.nuscenes_to_yolo import DEDUP_COVER, covered_fraction, suppress_covered
+    from data.nuscenes_to_yolo import (
+        DEDUP_COVER,
+        MERGE_CLASSES,
+        MERGE_IOU,
+        covered_fraction,
+        merge_rows,
+        suppress_covered,
+    )
 
     HAVE_DEPS = True
 except ImportError:  # pyquaternion / devkit absent
@@ -18,7 +25,22 @@ except ImportError:  # pyquaternion / devkit absent
 
 
 def box(cls, x1, y1, x2, y2, z=10.0):
-    return {"cls": cls, "box": [x1, y1, x2, y2], "z": z}
+    return {
+        "cls": cls,
+        "box": [x1, y1, x2, y2],
+        "z": z,
+        "dims_whl": [2.32, 0.3, 1.06],
+        "trunc": False,
+        "vis": 4,
+    }
+
+
+def receding_row(n=6):
+    """A roadside row: side by side, each partly covering its neighbour."""
+    return [
+        box(1, 100 + 70 * i, 500 - 9 * i, 280 + 70 * i, 640 - 20 * i, z=9.0 + 3 * i)
+        for i in range(n)
+    ]
 
 
 def test_covered_fraction():
@@ -66,6 +88,43 @@ def test_partial_overlap_is_not_a_duplicate():
 def test_zero_cover_disables_it():
     row = [box(1, 100, 400, 600, 520), box(1, 150, 410, 560, 505)]
     assert suppress_covered(row, 0.0) == (row, 0)
+
+
+def test_a_row_merges_into_one_box():
+    row = receding_row(6)
+    merged, dropped = merge_rows(row, MERGE_IOU, MERGE_CLASSES)
+    assert len(merged) == 1 and dropped == 5
+    # chained through neighbours: the ends do not overlap each other directly
+    assert merge_rows(row[:1] + row[-1:], MERGE_IOU, MERGE_CLASSES)[1] == 0
+
+
+def test_merged_box_keeps_the_nearest_depth_and_contact_point():
+    row = receding_row(6)
+    merged = merge_rows(row, MERGE_IOU, MERGE_CLASSES)[0][0]
+    assert merged["z"] == min(o["z"] for o in row)
+    # the bottom edge is still the nearest segment's contact point, so the
+    # ground-plane distance estimate stays exact
+    assert merged["box"][3] == max(o["box"][3] for o in row)
+    # per-segment depths survive for checking the geometry object by object
+    assert merged["z_segments"] == sorted(round(o["z"], 2) for o in row)
+    assert merged["n_merged"] == 6
+
+
+def test_a_barrier_across_the_road_stays_separate():
+    objs = receding_row(3) + [box(1, 1300, 440, 1360, 480, z=35.0)]
+    merged, _ = merge_rows(objs, MERGE_IOU, MERGE_CLASSES)
+    assert len(merged) == 2
+
+
+def test_cones_are_never_merged():
+    """Cones are discrete objects; only barriers form a continuous structure."""
+    cones = [box(0, 100, 500, 200, 640, z=9.0), box(0, 150, 505, 250, 635, z=10.0)]
+    assert merge_rows(cones, MERGE_IOU, MERGE_CLASSES) == (cones, 0)
+
+
+def test_zero_iou_disables_merging():
+    row = receding_row(4)
+    assert merge_rows(row, 0.0, MERGE_CLASSES) == (row, 0)
 
 
 if __name__ == "__main__":

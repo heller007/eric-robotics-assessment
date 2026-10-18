@@ -39,6 +39,8 @@ IMG_W, IMG_H = 1600, 900
 MIN_BOX_PX = 4
 MIN_VISIBILITY = 2  # devkit levels 1..4; 2 means at least 40% visible
 DEDUP_COVER = 0.7   # drop a box this much inside a bigger one of the same class
+MERGE_IOU = 0.15    # overlap at which two boxes of a mergeable class are one object
+MERGE_CLASSES = {1}  # barrier: a roadside row is one visual structure, not six
 
 
 def camera_height_pitch(nusc, sample_data) -> tuple[float, float]:
@@ -101,6 +103,80 @@ def suppress_covered(objects: list[dict], cover: float) -> tuple[list[dict], int
     return kept, len(objects) - len(kept)
 
 
+def iou(a: list[float], b: list[float]) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def merge_rows(objects: list[dict], iou_thr: float, classes: set[int]) -> tuple[list[dict], int]:
+    """Merge overlapping boxes of one class into a box per visual structure.
+
+    nuScenes annotates each barrier segment separately, so a roadside row of six
+    barriers is six boxes standing side by side, each only partly covering its
+    neighbour. In the image that row is one continuous object, and no 2D detector
+    can recover the segmentation from pixels - it predicts one box, which is the
+    right answer being scored as five misses. Merging the row makes the target
+    achievable.
+
+    The merged depth is the *nearest* contributing segment, which is what matters
+    downstream ("a barrier starts 9 m ahead"). The ground-plane distance estimate
+    stays exact, because the merged box's bottom edge is still that nearest
+    segment's contact point. The pinhole estimate reads slightly tall, since the
+    merged box's top comes from the far end of the row near the horizon - that
+    bias is what fitting H_eff absorbs, and the per-segment depths are kept in
+    the sidecar so the geometry can still be checked per object.
+    """
+    if iou_thr <= 0 or len(objects) < 2:
+        return objects, 0
+
+    groups: list[list[dict]] = []
+    for obj in objects:
+        if obj["cls"] not in classes:
+            groups.append([obj])
+            continue
+        hit = None
+        for group in groups:
+            if group[0]["cls"] != obj["cls"]:
+                continue
+            if any(iou(obj["box"], other["box"]) > iou_thr for other in group):
+                hit = group
+                break
+        if hit is None:
+            groups.append([obj])
+        else:
+            hit.append(obj)
+
+    merged = []
+    for group in groups:
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        nearest = min(group, key=lambda o: o["z"])
+        merged.append(
+            {
+                "cls": group[0]["cls"],
+                "box": [
+                    min(o["box"][0] for o in group),
+                    min(o["box"][1] for o in group),
+                    max(o["box"][2] for o in group),
+                    max(o["box"][3] for o in group),
+                ],
+                "z": nearest["z"],
+                "dims_whl": nearest["dims_whl"],
+                "trunc": any(o["trunc"] for o in group),
+                "vis": max(o["vis"] for o in group),
+                "n_merged": len(group),
+                "z_segments": sorted(round(o["z"], 2) for o in group),
+            }
+        )
+    return merged, len(objects) - len(merged)
+
+
 def clear_previous(out: Path) -> int:
     """Drop what a previous conversion wrote, leaving the COCO images alone.
 
@@ -127,6 +203,7 @@ def convert(
     link_mode: str = "auto",
     val_scenes: list[str] | None = None,
     dedup_cover: float = DEDUP_COVER,
+    merge_iou: float = MERGE_IOU,
 ) -> dict:
     from nuscenes.nuscenes import NuScenes
     from nuscenes.utils.geometry_utils import BoxVisibility, view_points
@@ -215,6 +292,8 @@ def convert(
                     )
                 meta_objs, duplicates = suppress_covered(meta_objs, dedup_cover)
                 stats["dropped"]["duplicate_overlap"] += duplicates
+                meta_objs, merged = merge_rows(meta_objs, merge_iou, MERGE_CLASSES)
+                stats["dropped"]["merged_into_row"] += merged
                 lines = []
                 for obj in meta_objs:
                     bx1, by1, bx2, by2 = obj["box"]
@@ -290,6 +369,13 @@ def main() -> None:
         "box of the same class; 0 keeps every annotation",
     )
     ap.add_argument(
+        "--merge-iou",
+        type=float,
+        default=MERGE_IOU,
+        help="overlap at which neighbouring boxes of a mergeable class become one "
+        "object (barriers only); 0 keeps every segment separate",
+    )
+    ap.add_argument(
         "--link-mode",
         choices=list(LINK_ORDER),
         default="auto",
@@ -314,6 +400,7 @@ def main() -> None:
         args.link_mode,
         val_scenes,
         args.dedup_cover,
+        args.merge_iou,
     )
     print(summarise(stats))
 
