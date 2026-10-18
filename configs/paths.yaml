@@ -1,0 +1,17 @@
+# Every script reads this file, so a run is reproducible from the command line.
+# On Kaggle the *_root entries can stay null: common/env.py auto-detects the
+# matching folder under /kaggle/input and the writable dirs under /kaggle/working.
+
+# Folder that directly contains  v1.0-mini/  samples/  sweeps/  maps/
+nuscenes_root: null
+
+# Folder that contains  annotations/  train2017/  val2017/  (optional: when null
+# and download_coco is true, only the stop-sign images are fetched over HTTP)
+coco_root: null
+download_coco: true
+
+# Where the converted, merged YOLO dataset is written
+out_root: datasets/yolo_3class
+
+# Where training runs / exported engines land
+runs_root: runs

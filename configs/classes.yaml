@@ -1,0 +1,15 @@
+# One place defines the class order. Everything else imports it.
+names:
+  0: cone
+  1: barrier
+  2: stop_sign
+
+# source class -> unified index
+nuscenes_map:
+  movable_object.trafficcone: 0
+  movable_object.barrier: 1
+
+# COCO 'stop sign': category_id 13 in the annotation json, index 11 in the
+# 80-class order a COCO-pretrained YOLO predicts.
+coco_category_name: stop sign
+coco_pretrained_index: 11

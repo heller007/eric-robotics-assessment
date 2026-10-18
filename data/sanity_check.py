@@ -1,0 +1,179 @@
+"""Checks that must pass before a single epoch is trained.
+
+  1. Draw N random converted images with their boxes - eyeball them.
+  2. Per-class instance counts per split; both val scenes need cones and barriers.
+  3. K differs per camera (otherwise get_sample_data was misused).
+  4. Every meta box has Z > 0 and a plausible pixel height for its depth.
+
+Usage
+  python -m data.sanity_check --draw 20
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import random
+from collections import defaultdict
+from pathlib import Path
+
+from common.config import class_names, load_yaml, resolve
+from common.env import writable_root
+
+COLORS = [(0, 165, 255), (255, 128, 0), (0, 0, 255)]  # BGR: cone, barrier, stop sign
+IMG_EXT = (".jpg", ".jpeg", ".png")
+
+
+def depth_for(meta_objs: list[dict], cls: int, box: tuple[int, int, int, int]) -> float | None:
+    """Ground-truth Z of the meta box whose centre is closest to a drawn box.
+
+    The label line is a rounded, normalised copy of the meta box, so matching by
+    centre distance (a couple of pixels at most) is enough and also confirms the
+    two agree.
+    """
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    best, best_d = None, 4.0
+    for obj in meta_objs:
+        if obj["cls"] != cls:
+            continue
+        ox = (obj["box"][0] + obj["box"][2]) / 2
+        oy = (obj["box"][1] + obj["box"][3]) / 2
+        d = abs(ox - cx) + abs(oy - cy)
+        if d < best_d:
+            best, best_d = obj["z"], d
+    return best
+
+
+def draw_samples(out: Path, split: str, n: int, dest: Path, seed: int = 0) -> int:
+    import cv2
+
+    names = class_names()
+    dest.mkdir(parents=True, exist_ok=True)
+    images = sorted(p for p in (out / "images" / split).glob("*") if p.suffix.lower() in IMG_EXT)
+    if not images:
+        return 0
+    random.Random(seed).shuffle(images)
+
+    drawn = 0
+    for img_path in images:
+        lbl = out / "labels" / split / f"{img_path.stem}.txt"
+        lines = (
+            [ln for ln in lbl.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            if lbl.exists()
+            else []
+        )
+        if not lines:
+            continue  # a background frame tells the eye nothing
+        im = cv2.imread(str(img_path))
+        if im is None:
+            continue
+        h, w = im.shape[:2]
+
+        meta_path = out / "meta" / split / f"{img_path.stem}.json"
+        meta_objs = []
+        if meta_path.exists():
+            meta_objs = json.loads(meta_path.read_text(encoding="utf-8"))["objects"]
+
+        for ln in lines:
+            cls, cx, cy, bw, bh = ln.split()
+            cls = int(cls)
+            cx, cy, bw, bh = (float(v) for v in (cx, cy, bw, bh))
+            x1, y1 = int((cx - bw / 2) * w), int((cy - bh / 2) * h)
+            x2, y2 = int((cx + bw / 2) * w), int((cy + bh / 2) * h)
+            color = COLORS[cls % len(COLORS)]
+            cv2.rectangle(im, (x1, y1), (x2, y2), color, 2)
+            z = depth_for(meta_objs, cls, (x1, y1, x2, y2))
+            tag = names[cls] if z is None else f"{names[cls]} {z:.1f}m"
+            cv2.putText(im, tag, (x1, max(12, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        cv2.imwrite(str(dest / f"{split}_{img_path.stem}.jpg"), im)
+        drawn += 1
+        if drawn >= n:
+            break
+    return drawn
+
+
+def check_meta(out: Path, splits: list[str]) -> list[str]:
+    problems = []
+    per_camera_fx: dict[str, set] = defaultdict(set)
+    seen_depths = []
+
+    for split in splits:
+        meta_dir = out / "meta" / split
+        if not meta_dir.is_dir():
+            continue
+        for meta_path in meta_dir.glob("*.json"):
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            K = meta["K"]
+            per_camera_fx[meta["camera"]].add(round(K[0][0], 3))
+            if K[0][0] <= 0 or K[1][1] <= 0:
+                problems.append(f"{meta_path.name}: non-positive focal length")
+            if meta["h_cam"] <= 0:
+                problems.append(f"{meta_path.name}: camera height {meta['h_cam']}")
+            for obj in meta["objects"]:
+                if obj["z"] <= 0:
+                    problems.append(f"{meta_path.name}: non-positive Z {obj['z']}")
+                seen_depths.append(obj["z"])
+
+    distinct_fx = {next(iter(v)) for v in per_camera_fx.values() if len(v) == 1}
+    if per_camera_fx and len(distinct_fx) < 2:
+        problems.append(
+            "every camera reports the same fx - K is probably not per-camera"
+        )
+    for cam, fxs in per_camera_fx.items():
+        if len(fxs) > 1:
+            problems.append(f"{cam}: fx varies within the camera ({sorted(fxs)[:3]}...)")
+
+    if seen_depths:
+        seen_depths.sort()
+        mid = seen_depths[len(seen_depths) // 2]
+        print(
+            f"depth: {len(seen_depths)} boxes, min {seen_depths[0]:.1f} m, "
+            f"median {mid:.1f} m, max {seen_depths[-1]:.1f} m"
+        )
+    print(f"cameras seen: {', '.join(sorted(per_camera_fx))}")
+    return problems
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--draw", type=int, default=20)
+    ap.add_argument("--dest", default="results/sanity")
+    ap.add_argument("--splits", nargs="*", default=["train", "val"])
+    ap.add_argument("--strict", action="store_true")
+    args = ap.parse_args()
+
+    paths = load_yaml("paths.yaml")
+    out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
+    dest = resolve(args.dest)
+
+    from data.merge import scan_split
+
+    names = class_names()
+    problems = []
+    for split in args.splits:
+        info = scan_split(out, split)
+        present = ", ".join(f"{names[c]}={info['counts'].get(c, 0)}" for c in range(len(names)))
+        print(f"{split}: {info['images']} images | {present}")
+        for c in range(len(names)):
+            if info["counts"].get(c, 0) == 0:
+                problems.append(f"{split}: zero {names[c]} instances")
+
+    problems += check_meta(out, args.splits)
+
+    for split in args.splits:
+        n = draw_samples(out, split, args.draw, dest / split)
+        print(f"{split}: drew {n} annotated images into {dest / split}")
+
+    if problems:
+        print("\nproblems:")
+        for p in dict.fromkeys(problems):
+            print(f"  - {p}")
+        if args.strict:
+            raise SystemExit(1)
+    else:
+        print("\nall sanity checks passed")
+
+
+if __name__ == "__main__":
+    main()

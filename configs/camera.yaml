@@ -1,0 +1,17 @@
+# Runtime camera constants. nuScenes frames carry their own K / h_cam / pitch in
+# the sidecar meta json; this file is what app/realtime.py falls back to for a
+# webcam or the robot's own mount.
+image_width: 1600
+image_height: 900
+
+# pinhole intrinsics (pixels). null -> estimated from a 60 deg horizontal FOV.
+fx: null
+fy: null
+cx: null
+cy: null
+horizontal_fov_deg: 60.0
+
+# ground-plane extrinsics
+camera_height_m: 1.51     # nuScenes CAM_FRONT sits ~1.51 m up; set to your robot's mount
+pitch_deg: 0.0            # positive = camera looking down
+horizon_guard_deg: 0.5    # reject ground-plane depth when pitch+alpha is below this

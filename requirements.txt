@@ -1,0 +1,23 @@
+# Task 1 - data pipeline
+nuscenes-devkit>=1.1.9
+pyquaternion>=0.9.9
+numpy>=1.24,<2.1
+opencv-python-headless>=4.9
+pillow>=10.0
+tqdm>=4.66
+pyyaml>=6.0
+requests>=2.31
+
+# Task 2 - detection
+ultralytics>=8.3.0
+
+# Task 3 - distance
+scipy>=1.11
+matplotlib>=3.8
+pandas>=2.0
+
+# Task 4 - optimization (install on demand; heavy)
+# onnx>=1.16
+# onnxruntime>=1.18
+# openvino>=2024.3
+# torch-pruning>=1.4

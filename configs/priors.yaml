@@ -1,0 +1,31 @@
+# Filled by  python -m distance.fit_priors  (Task 3) on the train split.
+# The values below are the physical-size starting points from the nuScenes
+# category stats; H_eff replaces them once fitted, because boxes projected from
+# a 3D cuboid are taller than the visible object.
+sigma_v_px: 2.0           # box-edge noise used by the fusion weights
+
+classes:
+  cone:
+    index: 0
+    dim: h                # pinhole uses box height
+    H_eff: 0.78           # m, nuScenes mean cone height
+    r: 0.17               # relative std of the size prior (0.13 / 0.78)
+    use_ground_plane: true
+    a: 1.0                # per-class linear correction  Z = a * Z_hat + b
+    b: 0.0
+  barrier:
+    index: 1
+    dim: h
+    H_eff: 1.06
+    r: 0.09               # 0.10 / 1.06
+    use_ground_plane: true
+    a: 1.0
+    b: 0.0
+  stop_sign:
+    index: 2
+    dim: w                # octagon; the pole or a truncation often cuts the bottom
+    H_eff: 0.75           # m, width of a US R1-1 sign (762 mm)
+    r: 0.10
+    use_ground_plane: false
+    a: 1.0
+    b: 0.0

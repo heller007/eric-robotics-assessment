@@ -1,0 +1,23 @@
+# datasets and run artifacts are never committed
+datasets/
+runs/
+weights/
+*.pt
+*.engine
+*.onnx
+*_openvino_model/
+*.tgz
+*.zip
+
+# results: keep tables and plots, drop bulky media
+results/**/*.mp4
+results/**/*.avi
+results/frames/
+
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+.DS_Store
