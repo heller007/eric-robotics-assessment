@@ -1,16 +1,22 @@
-"""Run the whole Task 1 pipeline in one command.
+"""Build the Task 1 dataset in one command.
 
-A Kaggle session keeps nothing, so every later task's notebook starts by calling
-this. It skips the conversion when the dataset is already there, which makes
-re-running a notebook cheap.
+This is the live path: the published copy on Kaggle is still awaiting
+compression, so the dataset gets built locally from nuScenes v1.0-mini plus the
+COCO stop signs.
 
-Each step is invoked exactly as a person would from the shell, so this file also
-serves as the canonical order of operations.
+It skips the conversion when the dataset is already there, so re-running is
+cheap. Each step is invoked exactly as a person would from the shell, so this
+file also serves as the canonical order of operations.
 
 Usage
-  python -m data.prepare                  # build whatever is missing
-  python -m data.prepare --force          # rebuild from scratch
-  python -m data.prepare --no-pseudo      # skip the GPU step
+  python -m data.prepare --fetch-nuscenes     # download the raw data too, then build
+  python -m data.prepare                      # build whatever is missing
+  python -m data.prepare --force              # rebuild from scratch
+  python -m data.prepare --no-pseudo          # skip the GPU step
+  python -m data.prepare --link-mode copy     # duplicate images instead of linking
+
+Roughly 15-25 minutes end to end with a GPU, most of it the COCO download and
+the pseudo-label pass; on CPU the pseudo-label pass dominates.
 """
 from __future__ import annotations
 
@@ -27,6 +33,7 @@ from common.env import (
     find_nuscenes_root,
     writable_root,
 )
+from common.staging import LINK_ORDER
 
 
 def step(label: str, cmd: list[str]) -> None:
@@ -52,7 +59,20 @@ def main() -> None:
     ap.add_argument("--no-coco", action="store_true", help="skip the stop sign source")
     ap.add_argument("--device", default="", help="blank = auto (CUDA if present)")
     ap.add_argument("--pseudo-weights", default="yolo11n.pt")
+    ap.add_argument("--pseudo-batch", type=int, default=16)
     ap.add_argument("--draw", type=int, default=12)
+    ap.add_argument(
+        "--link-mode",
+        choices=list(LINK_ORDER),
+        default="auto",
+        help="how source images reach images/<split>/; auto tries hardlink, then "
+        "symlink, then copy",
+    )
+    ap.add_argument(
+        "--fetch-nuscenes",
+        action="store_true",
+        help="download v1.0-mini first if it is not on this machine (~4.2 GB)",
+    )
     args = ap.parse_args()
 
     paths = load_paths()
@@ -77,14 +97,39 @@ def main() -> None:
     if existing:
         print(f"dataset already present at {out} - validating only (use --force to rebuild)")
     else:
+        if args.fetch_nuscenes:
+            try:
+                find_nuscenes_root(args.nuscenes_root or paths.get("nuscenes_root"))
+            except FileNotFoundError:
+                step("download nuScenes v1.0-mini", py + ["data.fetch_nuscenes"])
+                paths = load_paths()  # fetch_nuscenes records the root it extracted to
+
         nuscenes = find_nuscenes_root(args.nuscenes_root or paths.get("nuscenes_root"))
+        print(f"\nbuilding {out}")
+        print(f"  nuScenes  : {nuscenes}")
+        print(f"  staging   : {args.link_mode}")
+        print(
+            "  expect roughly: conversion a few minutes, the COCO stop signs a few "
+            "more (~350 MB over HTTP unless --coco-root is set),\n"
+            "  and the pseudo-label pass 2-5 minutes on a GPU or up to an hour on CPU"
+        )
+
         step(
             "nuScenes -> YOLO",
-            py + ["data.nuscenes_to_yolo", "--nuscenes-root", str(nuscenes), "--out", str(out)],
+            py
+            + [
+                "data.nuscenes_to_yolo",
+                "--nuscenes-root",
+                str(nuscenes),
+                "--out",
+                str(out),
+                "--link-mode",
+                args.link_mode,
+            ],
         )
         if not args.no_coco:
             coco = find_coco_root(args.coco_root or paths.get("coco_root"))
-            cmd = py + ["data.coco_stopsign", "--out", str(out)]
+            cmd = py + ["data.coco_stopsign", "--out", str(out), "--link-mode", args.link_mode]
             if coco:
                 cmd += ["--coco-root", str(coco)]
             step("COCO stop signs", cmd)
@@ -100,6 +145,8 @@ def main() -> None:
                     args.pseudo_weights,
                     "--conf",
                     "0.5",
+                    "--batch",
+                    str(args.pseudo_batch),
                     "--device",
                     str(args.device),
                 ],

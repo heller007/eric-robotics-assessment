@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import zipfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,6 +27,7 @@ from tqdm import tqdm
 from common.cli import friendly
 from common.config import load_yaml, resolve
 from common.env import find_coco_root, writable_root
+from common.staging import LINK_ORDER, stage_image
 
 ANN_ZIP = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
 IMG_URL = "http://images.cocodataset.org/{split}/{file_name}"
@@ -116,6 +116,7 @@ def export_split(
     category_name: str,
     workers: int = 16,
     limit: int | None = None,
+    link_mode: str = "auto",
 ) -> Counter:
     target = SPLIT_MAP[split]
     for sub in ("images", "labels"):
@@ -138,12 +139,7 @@ def export_split(
         if have_local:
             src = local_images / file_name
             if src.exists():
-                if not dst.exists():
-                    try:
-                        dst.symlink_to(src)
-                    except (OSError, NotImplementedError):
-                        shutil.copy2(src, dst)
-                stats["linked"] += 1
+                stats[stage_image(src, dst, link_mode)] += 1
             else:
                 pending.append((file_name, dst))
         else:
@@ -182,6 +178,12 @@ def main() -> None:
     ap.add_argument("--cache", default=None, help="where the annotation zip is kept")
     ap.add_argument("--splits", nargs="*", default=["train2017", "val2017"])
     ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument(
+        "--link-mode",
+        choices=list(LINK_ORDER),
+        default="auto",
+        help="how a locally present COCO image reaches images/<split>/",
+    )
     ap.add_argument("--limit", type=int, default=None, help="smoke test")
     args = ap.parse_args()
 
@@ -204,6 +206,7 @@ def main() -> None:
             classes["coco_category_name"],
             args.workers,
             args.limit,
+            args.link_mode,
         )
         print(f"{split}: {dict(stats)}")
         totals.update(stats)

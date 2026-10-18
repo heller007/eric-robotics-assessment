@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 from collections import Counter
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from tqdm import tqdm
 from common.cli import friendly
 from common.config import load_yaml, resolve
 from common.env import find_nuscenes_root, writable_root
+from common.staging import LINK_ORDER, stage_image
 
 CAMS = [
     "CAM_FRONT",
@@ -54,15 +54,6 @@ def camera_height_pitch(nusc, sample_data) -> tuple[float, float]:
     return float(cs["translation"][2]), pitch
 
 
-def link_or_copy(src: Path, dst: Path) -> None:
-    if dst.exists():
-        return
-    try:
-        dst.symlink_to(src)
-    except (OSError, NotImplementedError):
-        shutil.copy2(src, dst)
-
-
 def make_dirs(out: Path) -> None:
     for split in ("train", "val"):
         for sub in ("images", "labels", "meta"):
@@ -75,6 +66,7 @@ def convert(
     version: str = "v1.0-mini",
     cams: list[str] | None = None,
     max_scenes: int | None = None,
+    link_mode: str = "auto",
 ) -> dict:
     from nuscenes.nuscenes import NuScenes
     from nuscenes.utils.geometry_utils import BoxVisibility, view_points
@@ -93,6 +85,7 @@ def convert(
         "images": Counter(),
         "scenes": {"train": [], "val": []},
         "dropped": Counter(),
+        "staging": Counter(),
     }
 
     scenes = nusc.scene[:max_scenes] if max_scenes else nusc.scene
@@ -157,7 +150,7 @@ def convert(
 
                 src = Path(img_path)
                 stem = src.stem
-                link_or_copy(src, out / "images" / split / src.name)
+                stats["staging"][stage_image(src, out / "images" / split / src.name, link_mode)] += 1
                 (out / "labels" / split / f"{stem}.txt").write_text(
                     "\n".join(lines), encoding="utf-8"
                 )
@@ -205,6 +198,13 @@ def main() -> None:
     ap.add_argument("--out", default=None, help="default: configs/paths.yaml out_root")
     ap.add_argument("--cams", nargs="*", default=None, help="default: all 6")
     ap.add_argument("--max-scenes", type=int, default=None, help="smoke test")
+    ap.add_argument(
+        "--link-mode",
+        choices=list(LINK_ORDER),
+        default="auto",
+        help="how images reach images/<split>/: auto tries hardlink, then "
+        "symlink, then copy (copy duplicates ~1.3 GB)",
+    )
     args = ap.parse_args()
 
     paths = load_yaml("paths.yaml")
@@ -213,7 +213,7 @@ def main() -> None:
 
     print(f"nuScenes root : {root}")
     print(f"output        : {out}")
-    stats = convert(root, out, args.version, args.cams, args.max_scenes)
+    stats = convert(root, out, args.version, args.cams, args.max_scenes, args.link_mode)
     print(summarise(stats))
 
     report = out / "nuscenes_stats.json"
@@ -224,6 +224,7 @@ def main() -> None:
                 "train_boxes": {str(k): v for k, v in stats["train"].items()},
                 "val_boxes": {str(k): v for k, v in stats["val"].items()},
                 "dropped": dict(stats["dropped"]),
+                "staging": dict(stats["staging"]),
                 "scenes": stats["scenes"],
             },
             indent=2,

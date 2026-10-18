@@ -1,10 +1,15 @@
-"""Get the prepared Task 1 dataset onto this machine and point the repo at it.
+"""Get an already-built Task 1 dataset onto this machine and point the repo at it.
 
-Task 1 has already been run and its output published as a Kaggle dataset, so
-there is no reason to rebuild it from nuScenes + COCO on every machine. This
-downloads (or locates) that dataset, checks what it actually contains, writes
+Downloads (or locates) a prepared copy, checks what it actually contains, writes
 configs/data.yaml with absolute paths, and remembers the location in
 configs/local.yaml so later commands need no flags.
+
+NOT the current path: the published copy
+(pandeyvineet/eric-cones-stops-barriers) is still awaiting compression on Kaggle
+and cannot be downloaded, so `kaggle_dataset` in configs/paths.yaml is null and
+the dataset is built locally with `python -m data.prepare --fetch-nuscenes`
+instead. Put the slug back once it is ready and this works again - nothing else
+needs to change.
 
 Usage
   python -m data.fetch_dataset                          # download the published set

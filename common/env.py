@@ -195,8 +195,9 @@ def find_dataset_root(
 
     raise FileNotFoundError(
         "No prepared dataset found. Either\n"
-        "  python -m data.fetch_dataset          (download the published one), or\n"
-        "  python -m data.prepare --nuscenes-root ...   (build it from scratch), or\n"
+        "  python -m data.prepare --fetch-nuscenes   (build it - this is the live path), or\n"
+        "  python -m data.fetch_dataset              (download a published copy, once\n"
+        "                                             kaggle_dataset is set again), or\n"
         "  pass --dataset-root /path/to/it"
     )
 

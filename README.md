@@ -34,9 +34,9 @@ starts. Every task has one Kaggle notebook and one set of modules.
 
 ### Task 1 - data pipeline (done)
 
-Output published as the Kaggle dataset
-`pandeyvineet/eric-cones-stops-barriers`; `python -m data.fetch_dataset` pulls it
-onto a machine, so nothing downstream needs nuScenes or the devkit.
+Built locally with `python -m data.prepare --fetch-nuscenes`, which downloads
+nuScenes v1.0-mini, converts it, adds the COCO stop signs, pseudo-labels the
+missing ones, and validates the result.
 
 Builds one 3-class YOLO set: **0 cone, 1 barrier, 2 stop_sign**.
 
@@ -145,37 +145,57 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
 
-Then check the machine and pull the dataset:
+Then check the machine and build the dataset:
 
 ```bash
-python -m common.doctor          # python, GPU, packages, dataset, weights
-python -m data.fetch_dataset     # downloads pandeyvineet/eric-cones-stops-barriers
+python -m common.doctor                      # python, GPU, packages, sources, dataset, weights
+python -m data.prepare --fetch-nuscenes      # ~4.2 GB download, then the full Task 1 build
 ```
 
 `doctor` is the first thing to run when something looks wrong - it says whether
-torch sees a GPU, which optional packages are absent, and whether the dataset has
-been located. `fetch_dataset` downloads through kagglehub (which caches), checks
-the tree actually contains images, labels **and** the `meta/` sidecars Task 3
-needs, writes `configs/data.yaml`, and records the location in
-`configs/local.yaml`.
+torch sees a GPU, which optional packages are absent, whether nuScenes and COCO
+are present, and whether the dataset has been built. `prepare` runs every Task 1
+step in order and skips what is already there, so re-running it is cheap.
 
-A private Kaggle dataset needs credentials on the machine: `kaggle.json` in
-`~/.kaggle/` (Windows: `%USERPROFILE%\.kaggle\`), or `KAGGLE_USERNAME` and
-`KAGGLE_KEY` in the environment. Already have a copy on disk? Skip the download
-with `python -m data.fetch_dataset --dataset-root D:/path/to/it`.
+Budget about 9 GB of free space while the download and extraction run, and
+15-25 minutes for the whole build on a GPU machine. The slow parts are the
+nuScenes download, the ~350 MB of COCO stop-sign images, and the pseudo-label
+pass; on CPU the last of those dominates, so `--no-pseudo` is there if you want
+to defer it (stop sign AP suffers - see Task 1 below).
+
+Getting the raw data separately, if you would rather:
+
+```bash
+python -m data.fetch_nuscenes --dest D:/datasets/nuscenes   # another drive
+python -m data.fetch_nuscenes --archive D:/v1.0-mini.tgz    # one you already have
+python -m data.fetch_nuscenes --no-keep-archive             # free 4.2 GB afterwards
+```
+
+The download resumes, so interrupting it costs nothing. Both fetchers record what
+they found in `configs/local.yaml`, so later commands need no flags. Downloading
+nuScenes means accepting its [Terms of Use](https://www.nuscenes.org/terms-of-use)
+(free for non-commercial use).
+
+**About the published dataset.** An earlier build of this dataset was uploaded as
+the Kaggle dataset `pandeyvineet/eric-cones-stops-barriers`, and
+`data/fetch_dataset.py` pulls it down through kagglehub, verifies it and wires it
+up. That copy is still awaiting compression on Kaggle and cannot be downloaded,
+so `kaggle_dataset` in `configs/paths.yaml` is set to null and the local build is
+the live path. Put the slug back when it is ready and nothing else needs to
+change.
 
 ### Working across two machines
 
 | Travels through git | Does not |
 | --- | --- |
-| everything in `configs/` except `local.yaml` and the generated `data*.yaml` | the dataset (Kaggle dataset) |
+| everything in `configs/` except `local.yaml` and the generated `data*.yaml` | nuScenes, COCO, and the built dataset |
 | all code, notebooks, tests, README | `runs/` and any `.pt` / `.engine` / `.onnx` |
 | `results/` tables and plots | `datasets/`, `configs/local.yaml` |
 
 So the loop is: commit and push on one machine, `git pull` on the other, and
-`python -m data.fetch_dataset` once per machine. Absolute paths never get
-committed - `configs/data.yaml` is generated per machine and git-ignored, which is
-why both PCs can keep the dataset in different places.
+`python -m data.prepare --fetch-nuscenes` once per machine. Absolute paths never
+get committed - `configs/data.yaml` is generated per machine and git-ignored,
+which is why both PCs can keep the data in different places.
 
 To move trained weights across, copy `runs/<run>/weights/best.pt` by hand (or
 publish it as its own Kaggle dataset). Nothing in the pipeline assumes they are
@@ -194,23 +214,30 @@ Any run in `configs/runs.yaml` works the same way, and `--set key=value` overrid
 one knob: `python -m detection.train --run B2 --set epochs=60`. `--device` is
 blank by default, meaning CUDA when it is there and CPU when it is not.
 
-### Task 1 - rebuilding the dataset (not normally needed)
-
-Task 1 is done; its output is the Kaggle dataset above. To change the conversion
-and rebuild it from the raw sources:
+### Task 1 - building the dataset
 
 ```bash
-python -m data.prepare --nuscenes-root /path/to/nuscenes --force
+python -m data.prepare --fetch-nuscenes
 # or step by step
-python -m data.nuscenes_to_yolo --nuscenes-root /path/to/nuscenes --out datasets/yolo_3class
-python -m data.coco_stopsign --out datasets/yolo_3class
-python -m data.pseudo_label  --out datasets/yolo_3class
-python -m data.merge         --out datasets/yolo_3class
-python -m data.sanity_check  --out datasets/yolo_3class --draw 20
+python -m data.fetch_nuscenes
+python -m data.nuscenes_to_yolo --out datasets/yolo_3class
+python -m data.coco_stopsign    --out datasets/yolo_3class
+python -m data.pseudo_label     --out datasets/yolo_3class
+python -m data.merge            --out datasets/yolo_3class
+python -m data.sanity_check     --out datasets/yolo_3class --draw 20
 ```
 
 Without `--force`, `data.prepare` finds the dataset that is already there and only
 re-validates it.
+
+**Images are linked, not copied.** YOLO locates a label by swapping `/images/` for
+`/labels/` in the image path, so all 2,424 frames have to be reachable under
+`images/<split>/` - but duplicating 1.3 GB to achieve that is pointless.
+`--link-mode auto` (the default) tries a hard link first, which is free and needs
+no privileges but cannot cross volumes; then a symbolic link, which crosses
+volumes but on Windows needs Developer Mode or an elevated shell; then a copy,
+which always works. Force one with `--link-mode copy` if you want a self-contained
+dataset directory to move around. The converter reports which was used.
 
 Paths, class order, camera constants, training runs and distance priors all live
 in `configs/`, so a run is reproducible from the command line.
@@ -229,9 +256,9 @@ python -m pytest tests -q
 ```
 configs/     paths.yaml, classes.yaml, camera.yaml, priors.yaml, runs.yaml
              local.yaml + data.yaml are per-machine and git-ignored
-common/      config, dataset discovery, doctor, label loading, drawing
-data/        fetch_dataset.py, prepare.py, nuscenes_to_yolo.py, coco_stopsign.py,
-             pseudo_label.py, merge.py, balance.py, sanity_check.py
+common/      config, dataset discovery, doctor, image staging, label loading, drawing
+data/        prepare.py, fetch_nuscenes.py, fetch_dataset.py, nuscenes_to_yolo.py,
+             coco_stopsign.py, pseudo_label.py, merge.py, balance.py, sanity_check.py
 detection/   train.py, infer.py
 distance/    pinhole.py, ground_plane.py, fusion.py, fit_priors.py, depth_model.py
 tracking/    kalman_z.py

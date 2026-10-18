@@ -93,6 +93,30 @@ def check_packages() -> None:
             line(WARN, mod, f"optional - {why}")
 
 
+def check_raw_sources() -> None:
+    """The raw data is only needed to *build* the dataset, so absence is a warning."""
+    print("\nraw sources (only needed to build the dataset)")
+    from common.config import load_paths
+    from common.env import find_coco_root, find_nuscenes_root
+
+    paths = load_paths()
+    try:
+        root = find_nuscenes_root(paths.get("nuscenes_root"))
+        n_images = sum(1 for _ in (root / "samples").rglob("*.jpg"))
+        line(OK, "nuScenes v1.0-mini", f"{root}  ({n_images} keyframe images)")
+    except FileNotFoundError:
+        line(WARN, "nuScenes v1.0-mini", "not here - python -m data.fetch_nuscenes (~4.2 GB)")
+    try:
+        coco = find_coco_root(paths.get("coco_root"))
+    except FileNotFoundError:
+        coco = None
+    line(
+        OK if coco else WARN,
+        "COCO 2017",
+        str(coco) if coco else "not here - the stop-sign images download over HTTP instead",
+    )
+
+
 def check_dataset() -> None:
     print("\ndataset")
     from common.config import CONFIG_DIR, LOCAL_CONFIG, load_paths
@@ -107,22 +131,22 @@ def check_dataset() -> None:
     line(
         OK if (CONFIG_DIR / "data.yaml").exists() else WARN,
         "configs/data.yaml",
-        "written by data.fetch_dataset or data.merge",
+        "written by data.prepare, data.merge or data.fetch_dataset",
     )
     try:
         root = find_dataset_root(
             paths.get("dataset_root"),
             paths.get("kaggle_dataset"),
-            allow_download=False,  # a doctor never downloads 2 GB
+            allow_download=False,  # a doctor never downloads gigabytes
             local_default=writable_root() / paths["out_root"],
         )
     except FileNotFoundError:
-        line(
-            NO,
-            "prepared dataset",
-            f"not on this machine - run: python -m data.fetch_dataset "
-            f"(slug {paths.get('kaggle_dataset')})",
+        hint = (
+            f"python -m data.fetch_dataset (slug {paths['kaggle_dataset']})"
+            if paths.get("kaggle_dataset")
+            else "python -m data.prepare --fetch-nuscenes"
         )
+        line(NO, "prepared dataset", f"not built yet - run: {hint}")
         return
 
     line(OK, "prepared dataset", str(root))
@@ -157,6 +181,7 @@ def main() -> None:
     check_python()
     has_gpu = check_torch()
     check_packages()
+    check_raw_sources()
     check_dataset()
     check_weights()
     print(

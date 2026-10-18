@@ -61,6 +61,7 @@ def run(
     splits: list[str],
     review: int,
     review_dir: Path,
+    batch: int = 16,
 ) -> dict:
     from ultralytics import YOLO
 
@@ -75,34 +76,41 @@ def run(
             continue
         added_boxes = 0
         added_images = 0
-        for img in tqdm(images, desc=f"pseudo-label {split}"):
-            res = model.predict(
-                str(img),
-                imgsz=imgsz,
-                conf=conf,
-                device=device,
-                classes=[coco_index],
-                verbose=False,
-            )[0]
-            label_path = out / "labels" / split / f"{img.stem}.txt"
-            lines = strip_class(label_path, STOP_SIGN_CLASS)
-
-            h, w = res.orig_shape
-            new = 0
-            for box in res.boxes:
-                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
-                if (x2 - x1) < 4 or (y2 - y1) < 4:
-                    continue
-                lines.append(
-                    f"{STOP_SIGN_CLASS} {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} "
-                    f"{(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}"
+        # Batched: 2,424 frames one at a time spends most of its wall clock on
+        # per-call overhead rather than on the model.
+        with tqdm(total=len(images), desc=f"pseudo-label {split}") as bar:
+            for start in range(0, len(images), batch):
+                chunk = images[start : start + batch]
+                results = model.predict(
+                    [str(p) for p in chunk],
+                    imgsz=imgsz,
+                    conf=conf,
+                    device=device,
+                    classes=[coco_index],
+                    verbose=False,
                 )
-                new += 1
-                if len(review_crops) < review:
-                    review_crops.append((img, [x1, y1, x2, y2]))
-            label_path.write_text("\n".join(lines), encoding="utf-8")
-            added_boxes += new
-            added_images += 1 if new else 0
+                for img, res in zip(chunk, results):
+                    label_path = out / "labels" / split / f"{img.stem}.txt"
+                    lines = strip_class(label_path, STOP_SIGN_CLASS)
+
+                    h, w = res.orig_shape
+                    new = 0
+                    for box in res.boxes:
+                        x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+                        if (x2 - x1) < 4 or (y2 - y1) < 4:
+                            continue
+                        lines.append(
+                            f"{STOP_SIGN_CLASS} {(x1 + x2) / 2 / w:.6f} "
+                            f"{(y1 + y2) / 2 / h:.6f} "
+                            f"{(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}"
+                        )
+                        new += 1
+                        if len(review_crops) < review:
+                            review_crops.append((img, [x1, y1, x2, y2]))
+                    label_path.write_text("\n".join(lines), encoding="utf-8")
+                    added_boxes += new
+                    added_images += 1 if new else 0
+                bar.update(len(chunk))
 
         summary[split] = {"images_with_signs": added_images, "boxes": added_boxes}
         print(f"{split}: {summary[split]}")
@@ -154,6 +162,7 @@ def main() -> None:
     ap.add_argument("--imgsz", type=int, default=960)
     ap.add_argument("--device", default="", help="blank = auto (CUDA if present)")
     ap.add_argument("--splits", nargs="*", default=["train", "val"])
+    ap.add_argument("--batch", type=int, default=16, help="images per forward pass")
     ap.add_argument("--review", type=int, default=30, help="crops in the contact sheet")
     ap.add_argument("--review-dir", default="results")
     args = ap.parse_args()
@@ -168,6 +177,7 @@ def main() -> None:
         args.splits,
         args.review,
         resolve(args.review_dir),
+        args.batch,
     )
 
 

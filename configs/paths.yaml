@@ -1,26 +1,29 @@
-# Every script reads this file, so a run is reproducible from the command line.
-# On Kaggle the *_root entries can stay null: common/env.py auto-detects the
-# matching folder under /kaggle/input and the writable dirs under /kaggle/working.
+# Committed defaults, identical on every machine. Per-machine paths belong in
+# configs/local.yaml, which is git-ignored and layered on top of this file -
+# data.fetch_nuscenes and data.fetch_dataset write it for you.
 
+# ------------------------------------------------------------- raw sources
 # Folder that directly contains  v1.0-mini/  samples/  sweeps/  maps/
+# Leave null and run:  python -m data.fetch_nuscenes
 nuscenes_root: null
+nuscenes_dest: datasets/nuscenes      # where fetch_nuscenes extracts to
 
 # Folder that contains  annotations/  train2017/  val2017/  (optional: when null
-# and download_coco is true, only the stop-sign images are fetched over HTTP)
+# and download_coco is true, only the ~2,000 stop-sign images are fetched)
 coco_root: null
 download_coco: true
 
-# Where the converted, merged YOLO dataset is written
+# ------------------------------------------------------------ Task 1 output
+# The merged 3-class YOLO dataset that everything downstream reads.
 out_root: datasets/yolo_3class
 
-# Where training runs / exported engines land
-runs_root: runs
-
-# ---------------------------------------------------------------- Task 1 output
-# The prepared 3-class YOLO dataset. Task 1 is already done and published, so
-# later tasks fetch this instead of rebuilding from nuScenes + COCO.
-#
-# Resolution order: --dataset-root, ERIC_DATASET_ROOT, /kaggle/input,
-# out_root above, then kaggle_dataset below.
+# A prepared copy published as a Kaggle dataset, used instead of rebuilding.
+# Disabled: the published version is still awaiting compression on Kaggle and
+# cannot be downloaded, so the local build is the live path. Put the slug back
+# once it is ready and data.fetch_dataset will pick it up again.
 dataset_root: null
-kaggle_dataset: pandeyvineet/eric-cones-stops-barriers
+kaggle_dataset: null
+# kaggle_dataset: pandeyvineet/eric-cones-stops-barriers
+
+# ------------------------------------------------------------------- outputs
+runs_root: runs
