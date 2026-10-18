@@ -60,6 +60,23 @@ def make_dirs(out: Path) -> None:
             (out / sub / split).mkdir(parents=True, exist_ok=True)
 
 
+def clear_previous(out: Path) -> int:
+    """Drop what a previous conversion wrote, leaving the COCO images alone.
+
+    A meta sidecar exists only for a nuScenes frame, so it identifies exactly
+    which files came from here. This matters when the val scenes change: without
+    it a frame that moves from val to train stays in both.
+    """
+    removed = 0
+    for split in ("train", "val"):
+        for meta in list((out / "meta" / split).glob("*.json")):
+            (out / "labels" / split / f"{meta.stem}.txt").unlink(missing_ok=True)
+            (out / "images" / split / f"{meta.stem}.jpg").unlink(missing_ok=True)
+            meta.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def convert(
     dataroot: Path,
     out: Path,
@@ -76,6 +93,9 @@ def convert(
     cams = cams or CAMS
     cls_map = load_yaml("classes.yaml")["nuscenes_map"]
     make_dirs(out)
+    cleared = clear_previous(out)
+    if cleared:
+        print(f"cleared {cleared} frames from a previous conversion")
 
     nusc = NuScenes(version=version, dataroot=str(dataroot), verbose=False)
     # The devkit's mini_val holds no barriers at all, so it cannot measure
