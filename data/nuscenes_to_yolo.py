@@ -23,7 +23,7 @@ from pyquaternion import Quaternion
 from tqdm import tqdm
 
 from common.cli import friendly
-from common.config import load_yaml, resolve
+from common.config import load_paths, load_yaml, resolve
 from common.env import find_nuscenes_root, writable_root
 from common.staging import LINK_ORDER, stage_image
 
@@ -231,8 +231,8 @@ def main() -> None:
         "--val-scenes",
         nargs="*",
         default=None,
-        help="scene names to hold out, e.g. scene-0061 scene-0103. Default is the "
-        "devkit's mini_val, which contains no barriers.",
+        help="scene names to hold out. Default comes from val_scenes in "
+        "configs/paths.yaml; the devkit's mini_val contains no barriers.",
     )
     ap.add_argument(
         "--link-mode",
@@ -243,14 +243,15 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    paths = load_yaml("paths.yaml")
+    paths = load_paths()
     root = find_nuscenes_root(args.nuscenes_root or paths.get("nuscenes_root"))
+    val_scenes = args.val_scenes or paths.get("val_scenes")
     out = resolve(args.out) if args.out else writable_root() / paths["out_root"]
 
     print(f"nuScenes root : {root}")
     print(f"output        : {out}")
     stats = convert(
-        root, out, args.version, args.cams, args.max_scenes, args.link_mode, args.val_scenes
+        root, out, args.version, args.cams, args.max_scenes, args.link_mode, val_scenes
     )
     print(summarise(stats))
 

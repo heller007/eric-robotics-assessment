@@ -56,6 +56,16 @@ Three details that decide whether the rest works:
   truncation and visibility - Task 3 needs all of it, and recovering it later
   means re-running the devkit.
 
+**The val split is not the devkit's.** `mini_val` (scene-0103, scene-0916)
+contains no barrier annotations at all, so barrier AP is unmeasurable on it -
+and "beat the zero-shot baseline on every class" then cannot be reported.
+Barriers are concentrated in two scenes (989 in scene-0061, 584 in scene-0553,
+48 across all the rest), so no split is both class-balanced and 20%. The
+hold-out is `scene-0655` + `scene-0553`, set in `configs/paths.yaml`: val gets
+218 cones and 584 barriers, train keeps 675 cones, 1037 barriers and all of
+scene-0061. That is 24% of cones and 36% of barriers in val - higher than usual,
+and the price of being able to measure the class at all.
+
 Boxes are dropped when visibility is below level 2, when no lidar or radar point
 hits them, when any cuboid corner is behind the camera, or when the projection is
 under 4 px.
