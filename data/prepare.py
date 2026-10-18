@@ -9,8 +9,9 @@ cheap. Each step is invoked exactly as a person would from the shell, so this
 file also serves as the canonical order of operations.
 
 Usage
-  python -m data.prepare --fetch-nuscenes     # download the raw data too, then build
+  python -m data.prepare --nuscenes-root D:/kaggle/nuscenes-mini   # a copy you have
   python -m data.prepare                      # build whatever is missing
+  python -m data.prepare --fetch-nuscenes     # download the raw data if none is found
   python -m data.prepare --force              # rebuild from scratch
   python -m data.prepare --no-pseudo          # skip the GPU step
   python -m data.prepare --link-mode copy     # duplicate images instead of linking
@@ -26,11 +27,12 @@ import sys
 from pathlib import Path
 
 from common.cli import friendly
-from common.config import REPO_ROOT, load_paths, resolve
+from common.config import REPO_ROOT, load_paths, resolve, set_local
 from common.env import (
     find_coco_root,
     find_dataset_root,
     find_nuscenes_root,
+    verify_nuscenes,
     writable_root,
 )
 from common.staging import LINK_ORDER
@@ -71,7 +73,14 @@ def main() -> None:
     ap.add_argument(
         "--fetch-nuscenes",
         action="store_true",
-        help="download v1.0-mini first if it is not on this machine (~4.2 GB)",
+        help="as a last resort, download v1.0-mini (~3.9 GiB) when no local copy "
+        "is found. A --nuscenes-root is always preferred.",
+    )
+    ap.add_argument("--cams", nargs="*", default=None, help="restrict to these cameras")
+    ap.add_argument(
+        "--no-save",
+        action="store_true",
+        help="do not record --nuscenes-root in configs/local.yaml",
     )
     args = ap.parse_args()
 
@@ -125,7 +134,8 @@ def main() -> None:
                 str(out),
                 "--link-mode",
                 args.link_mode,
-            ],
+            ]
+            + (["--cams", *args.cams] if args.cams else []),
         )
         if not args.no_coco:
             coco = find_coco_root(args.coco_root or paths.get("coco_root"))

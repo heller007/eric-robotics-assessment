@@ -16,10 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from common.config import load_paths, save_yaml  # noqa: E402
 from common.env import (  # noqa: E402
+    EXPECTED_CAMERAS,
     dataset_health,
     descend,
     find_dataset_root,
+    find_nuscenes_root,
     looks_like_prepared_dataset,
+    verify_nuscenes,
 )
 
 
@@ -123,6 +126,74 @@ def test_local_config_overrides_defaults_but_not_with_null():
         # a null in the local file must not blank out a working default
         assert cfg["kaggle_dataset"] == load_paths(Path(tmp) / "absent.yaml")["kaggle_dataset"]
         assert cfg["out_root"]  # untouched keys survive
+
+
+def make_nuscenes(root: Path, cameras=tuple(EXPECTED_CAMERAS), per_camera: int = 2) -> Path:
+    """A nuScenes-shaped tree, enough for the discovery checks."""
+    (root / "v1.0-mini").mkdir(parents=True, exist_ok=True)
+    (root / "v1.0-mini" / "sample.json").write_text("[]")
+    for cam in cameras:
+        d = root / "samples" / cam
+        d.mkdir(parents=True, exist_ok=True)
+        for i in range(per_camera):
+            (d / f"{cam}__{i}.jpg").write_bytes(b"")
+    return root
+
+
+def test_nuscenes_root_is_found_below_the_path_given():
+    """A Kaggle mirror or a hand-extracted zip leaves wrapper folders above it."""
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t)
+        deep = tmp / "nuscenes-mini" / "data"
+        make_nuscenes(deep)
+        assert find_nuscenes_root(tmp) == deep
+        assert find_nuscenes_root(deep) == deep
+
+
+def test_nuscenes_root_error_says_what_the_folder_holds():
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t)
+        (tmp / "images").mkdir()
+        (tmp / "notes.txt").write_text("x")
+        try:
+            find_nuscenes_root(tmp)
+        except FileNotFoundError as exc:
+            assert "v1.0-mini" in str(exc)
+            assert "images/" in str(exc) and "notes.txt" in str(exc)
+            return
+        raise AssertionError("a folder with no dataroot should be refused")
+
+
+def test_nuscenes_root_falls_back_to_the_default_location():
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t)
+        default = make_nuscenes(tmp / "extracted")
+        assert find_nuscenes_root(None, local_default=tmp / "extracted") == default
+        # unlike an explicit path, an empty default is not an error, just a miss
+        try:
+            find_nuscenes_root(None, local_default=tmp / "nothing-here")
+        except FileNotFoundError as exc:
+            assert "fetch_nuscenes" in str(exc)
+            return
+        raise AssertionError("nothing should have been found")
+
+
+def test_verify_nuscenes_reports_what_a_copy_holds():
+    with tempfile.TemporaryDirectory() as t:
+        info = verify_nuscenes(make_nuscenes(Path(t) / "ns"))
+        assert info["problems"] == [], info["problems"]
+        assert len(info["cameras"]) == 6
+        assert info["keyframe_images"] == 12
+
+
+def test_verify_nuscenes_notices_the_wrong_split():
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t) / "ns"
+        (root / "v1.0-trainval").mkdir(parents=True)
+        (root / "samples" / "CAM_FRONT").mkdir(parents=True)
+        problems = verify_nuscenes(root)["problems"]
+        assert any("wrong split" in p for p in problems), problems
+        assert any("no .jpg" in p for p in problems), problems
 
 
 if __name__ == "__main__":

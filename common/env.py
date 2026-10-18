@@ -90,28 +90,89 @@ def descend(root: Path, predicate, max_depth: int = 3) -> Path | None:
     return None
 
 
-def find_nuscenes_root(explicit: str | Path | None = None) -> Path:
-    """Folder that directly contains v1.0-mini/ and samples/."""
-    for cand in (explicit, os.environ.get("NUSCENES_ROOT")):
-        if cand:
-            p = resolve(cand)
-            if _looks_like_nuscenes(p):
-                return p
+def find_nuscenes_root(
+    explicit: str | Path | None = None, local_default: str | Path | None = None
+) -> Path:
+    """Folder that directly contains v1.0-mini/ and samples/.
+
+    A path given here does not have to be the dataroot itself: a Kaggle mirror or
+    a hand-extracted zip usually leaves one or two wrapper folders above it, and
+    which ones depends on how it was packed. So point at wherever you unpacked it
+    and the dataroot is found inside.
+    """
+    for cand in (explicit, os.environ.get("NUSCENES_ROOT"), local_default):
+        if not cand:
+            continue
+        p = resolve(cand)
+        found = descend(p, _looks_like_nuscenes)
+        if found:
+            return found
+        if cand is not local_default:
+            # an explicit path that holds nothing is a mistake worth reporting,
+            # while a default that holds nothing is just not set up yet
             raise FileNotFoundError(
-                f"{p} does not look like a nuScenes root "
-                "(expected v1.0-mini/ and samples/ inside it)"
+                f"{p} does not contain a nuScenes dataroot.\n"
+                "Expected a folder with v1.0-mini/ and samples/ inside it, at or "
+                "below the path given."
+                + (f"\nIt holds: {_brief_listing(p)}" if p.is_dir() else "\nIt does not exist.")
             )
+
     for d in _iter_candidates():
         if _looks_like_nuscenes(d):
             return d
+
     raise FileNotFoundError(
-        "No nuScenes root found - but you probably do not need it: Task 1 is done "
-        "and published, so\n"
-        "  python -m data.fetch_dataset\n"
-        "gets its output without nuScenes or the devkit. Only rebuilding the "
-        "dataset needs the raw data; for that, pass --nuscenes-root, set "
-        "NUSCENES_ROOT, or attach a nuScenes v1.0-mini dataset."
+        "No nuScenes v1.0-mini found. Either point at a copy you already have\n"
+        "  python -m data.fetch_nuscenes --root D:/path/where/you/unpacked/it\n"
+        "or download it (~3.9 GiB, resumable)\n"
+        "  python -m data.fetch_nuscenes\n"
+        "A path can also be set once in configs/local.yaml as nuscenes_root, or "
+        "given per command with --nuscenes-root / NUSCENES_ROOT."
     )
+
+
+def _brief_listing(d: Path, limit: int = 8) -> str:
+    try:
+        names = sorted(p.name + ("/" if p.is_dir() else "") for p in d.iterdir())
+    except (PermissionError, OSError):
+        return "unreadable"
+    if not names:
+        return "nothing"
+    shown = ", ".join(names[:limit])
+    return shown + (f", ... ({len(names)} entries)" if len(names) > limit else "")
+
+
+EXPECTED_CAMERAS = [
+    "CAM_FRONT",
+    "CAM_FRONT_LEFT",
+    "CAM_FRONT_RIGHT",
+    "CAM_BACK",
+    "CAM_BACK_LEFT",
+    "CAM_BACK_RIGHT",
+]
+
+
+def verify_nuscenes(root: Path, version: str = "v1.0-mini") -> dict:
+    """A quick look at a copy: which cameras it has and how many images."""
+    root = Path(root)
+    samples = root / "samples"
+    cameras = (
+        sorted(p.name for p in samples.iterdir() if p.is_dir() and p.name.startswith("CAM"))
+        if samples.is_dir()
+        else []
+    )
+    n_images = sum(1 for _ in samples.rglob("*.jpg")) if samples.is_dir() else 0
+    problems = []
+    if not (root / version).is_dir():
+        problems.append(f"no {version}/ folder - wrong split?")
+    if not n_images:
+        problems.append("samples/ holds no .jpg images")
+    return {
+        "root": str(root),
+        "cameras": cameras,
+        "keyframe_images": n_images,
+        "problems": problems,
+    }
 
 
 def find_coco_root(explicit: str | Path | None = None) -> Path | None:

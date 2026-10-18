@@ -96,6 +96,12 @@ def convert(
         while token:
             sample = nusc.get("sample", token)
             for cam in cams:
+                if cam not in sample["data"]:
+                    # mirrors of nuScenes sometimes ship a subset of the sensors
+                    if stats["dropped"][f"no_{cam}"] == 0:
+                        print(f"note: this copy has no {cam} - skipping it")
+                    stats["dropped"][f"no_{cam}"] += 1
+                    continue
                 sd_token = sample["data"][cam]
                 sd = nusc.get("sample_data", sd_token)
                 img_path, boxes, K = nusc.get_sample_data(

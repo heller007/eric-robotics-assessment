@@ -34,9 +34,9 @@ starts. Every task has one Kaggle notebook and one set of modules.
 
 ### Task 1 - data pipeline (done)
 
-Built locally with `python -m data.prepare --fetch-nuscenes`, which downloads
-nuScenes v1.0-mini, converts it, adds the COCO stop signs, pseudo-labels the
-missing ones, and validates the result.
+Built locally with `python -m data.prepare`, which converts nuScenes v1.0-mini
+(pointed at a local copy, or downloaded as a fallback), adds the COCO stop signs,
+pseudo-labels the missing ones, and validates the result.
 
 Builds one 3-class YOLO set: **0 cone, 1 barrier, 2 stop_sign**.
 
@@ -145,11 +145,27 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
 
-Then check the machine and build the dataset:
+Then check the machine and build the dataset. Already have nuScenes v1.0-mini
+(a Kaggle mirror such as `aadimator/nuscenes-mini`, or your own download)? Point
+at it - nothing is downloaded when you do:
 
 ```bash
-python -m common.doctor                      # python, GPU, packages, sources, dataset, weights
-python -m data.prepare --fetch-nuscenes      # ~4.2 GB download, then the full Task 1 build
+python -m common.doctor                                          # GPU, packages, sources, dataset
+python -m data.prepare --nuscenes-root D:/where/you/unpacked/it  # build Task 1
+```
+
+The path does not have to be the dataroot itself. A mirror usually leaves a
+wrapper folder or two above the `v1.0-mini/` + `samples/` pair, so point at
+wherever you unpacked it and the dataroot is found inside. It is then checked for
+the metadata tables, the six cameras and a plausible image count before anything
+runs - a partial mirror otherwise fails deep inside the devkit, with a confusing
+error. The path is remembered in `configs/local.yaml`, so later commands need no
+flag.
+
+Without a local copy, downloading is the fallback:
+
+```bash
+python -m data.prepare --fetch-nuscenes      # ~3.9 GiB, resumable, then the full build
 ```
 
 `doctor` is the first thing to run when something looks wrong - it says whether
@@ -157,24 +173,25 @@ torch sees a GPU, which optional packages are absent, whether nuScenes and COCO
 are present, and whether the dataset has been built. `prepare` runs every Task 1
 step in order and skips what is already there, so re-running it is cheap.
 
-Budget about 9 GB of free space while the download and extraction run, and
-15-25 minutes for the whole build on a GPU machine. The slow parts are the
-nuScenes download, the ~350 MB of COCO stop-sign images, and the pseudo-label
-pass; on CPU the last of those dominates, so `--no-pseudo` is there if you want
-to defer it (stop sign AP suffers - see Task 1 below).
+Budget 15-25 minutes for the whole build on a GPU machine, plus about 9 GB of
+free space if you are downloading. The slow parts are the nuScenes download, the
+~350 MB of COCO stop-sign images, and the pseudo-label pass; on CPU the last of
+those dominates, so `--no-pseudo` is there if you want to defer it (stop sign AP
+suffers - see Task 1 below).
 
-Getting the raw data separately, if you would rather:
+Getting the raw data on its own, without building:
 
 ```bash
-python -m data.fetch_nuscenes --dest D:/datasets/nuscenes   # another drive
-python -m data.fetch_nuscenes --archive D:/v1.0-mini.tgz    # one you already have
-python -m data.fetch_nuscenes --no-keep-archive             # free 4.2 GB afterwards
+python -m data.fetch_nuscenes --root D:/kaggle/nuscenes-mini   # register a copy
+python -m data.fetch_nuscenes --archive D:/nuscenes-mini.zip   # extract a .zip or .tgz
+python -m data.fetch_nuscenes                                  # download it
+python -m data.fetch_nuscenes --dest D:/datasets/nuscenes      # download elsewhere
+python -m data.fetch_nuscenes --no-keep-archive                # free the archive after
 ```
 
-The download resumes, so interrupting it costs nothing. Both fetchers record what
-they found in `configs/local.yaml`, so later commands need no flags. Downloading
-nuScenes means accepting its [Terms of Use](https://www.nuscenes.org/terms-of-use)
-(free for non-commercial use).
+The download resumes, so interrupting it costs nothing. Downloading nuScenes
+means accepting its [Terms of Use](https://www.nuscenes.org/terms-of-use) (free
+for non-commercial use).
 
 **About the published dataset.** An earlier build of this dataset was uploaded as
 the Kaggle dataset `pandeyvineet/eric-cones-stops-barriers`, and
@@ -193,7 +210,7 @@ change.
 | `results/` tables and plots | `datasets/`, `configs/local.yaml` |
 
 So the loop is: commit and push on one machine, `git pull` on the other, and
-`python -m data.prepare --fetch-nuscenes` once per machine. Absolute paths never
+`python -m data.prepare --nuscenes-root <where the raw data is>` once per machine. Absolute paths never
 get committed - `configs/data.yaml` is generated per machine and git-ignored,
 which is why both PCs can keep the data in different places.
 
@@ -217,9 +234,10 @@ blank by default, meaning CUDA when it is there and CPU when it is not.
 ### Task 1 - building the dataset
 
 ```bash
-python -m data.prepare --fetch-nuscenes
+python -m data.prepare --nuscenes-root D:/where/you/unpacked/it
+python -m data.prepare --fetch-nuscenes          # or download it as a fallback
 # or step by step
-python -m data.fetch_nuscenes
+python -m data.fetch_nuscenes --root D:/where/you/unpacked/it
 python -m data.nuscenes_to_yolo --out datasets/yolo_3class
 python -m data.coco_stopsign    --out datasets/yolo_3class
 python -m data.pseudo_label     --out datasets/yolo_3class
@@ -244,12 +262,21 @@ in `configs/`, so a run is reproducible from the command line.
 
 ### Tests
 
-The parts that are pure logic - the AP implementation, IoU, box matching, run-config
-merging, repeat-factor sampling - run without a GPU or a dataset:
+The parts that are pure logic - the AP implementation, IoU, box matching,
+run-config merging, repeat-factor sampling, dataset discovery, image staging -
+run without a GPU or a dataset:
 
 ```bash
 python -m pytest tests -q
 ```
+
+`tests/test_nuscenes_conversion.py` goes further: it builds a devkit-valid
+nuScenes containing a cone at exactly 10 m and a barrier at 15 m in front of a
+camera mounted 1.51 m up, runs the real converter over it, and checks the pixel
+box and the recorded depth against what the pinhole model requires. A projection
+bug does not announce itself - it produces boxes in plausible places - so this is
+the check that the camera-frame conventions are right. It needs
+`nuscenes-devkit` installed and skips itself when that is absent.
 
 ## Repo layout
 
