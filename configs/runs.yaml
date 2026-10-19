@@ -78,3 +78,22 @@ runs:
     load_from: yolo11n.pt
     freeze: 0
     imgsz: 640
+
+  # ---- barrier-only experiment: is an axis-aligned box the wrong primitive? ----
+  # Same frames, same filters, same split; only the label geometry differs. On a
+  # receding row the oriented box is about 55% of the axis-aligned box's area,
+  # so nearly half of the axis-aligned label is empty road - which caps IoU even
+  # for a correct prediction. Run data.barrier_obb first.
+  B3aabb:
+    purpose: "barrier only, axis-aligned boxes - the control"
+    models: [yolo11n.pt]
+    data: configs/barrier_aabb.yaml
+    freeze: 0
+    imgsz: 640
+
+  B3obb:
+    purpose: "barrier only, oriented boxes - a row is a thin diagonal shape"
+    models: [yolo11n-obb.pt]
+    data: configs/barrier_obb.yaml
+    freeze: 0
+    imgsz: 640
