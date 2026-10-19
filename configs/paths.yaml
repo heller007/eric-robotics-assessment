@@ -22,7 +22,7 @@ download_coco: true
 # scene that still has a usable count keeps both big scenes in training.
 # Val is small as a result (43 cones, 47 barriers); that is the trade, and the
 # Task 1 notebook recomputes it from the data rather than trusting these names.
-val_scenes: [scene-0103, scene-1077]
+val_scenes: [scene-0655, scene-0553]
 
 # ------------------------------------------------------------ Task 1 output
 # The merged 3-class YOLO dataset that everything downstream reads.
