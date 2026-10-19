@@ -28,6 +28,7 @@ starts. Every task has one Kaggle notebook and one set of modules.
 | --- | --- | --- | --- | --- |
 | 1 | **Data pipeline** - nuScenes -> YOLO, COCO stop signs, pseudo-labels, merge, sanity checks | `notebooks/task1_data_pipeline.ipynb` | `data/` | done |
 | 2 | **Detection** - B0 zero-shot baseline, fine-tune B1 / B1b / B2, per-class eval | `notebooks/task2_detection.ipynb` | `detection/`, `eval/det_eval.py` | done |
+| 2b | **Oriented boxes** - the measured winner, applied to all three classes | `notebooks/task2b_oriented.ipynb` | `data/obb_dataset.py` | done |
 | 3 | **Distance** - fit priors, D0 pinhole, D1 ground plane, fusion, correction, eval by range bin | `notebooks/task3_distance.ipynb` | `distance/`, `eval/dist_eval.py` | done |
 | 4 | **Edge optimisation** - ONNX / OpenVINO / TensorRT exports, INT8, pruning, benchmarks | `notebooks/task4_optimize.ipynb` | `optimize/`, `eval/benchmark.py` | planned |
 | 5 | **Integration** - threaded realtime app, ByteTrack + Kalman on Z, demo video, results tables | `notebooks/task5_integration.ipynb` | `app/`, `tracking/`, `results/` | planned |
@@ -220,7 +221,11 @@ per barrier, so `cv2.minAreaRect` over a structure's corners gives the rotated
 rectangle directly. That is what ruled segmentation out by comparison - masks
 would need a second dataset (nuImages), and that dataset has no depth.
 
-Reproduce both with `notebooks/task2b_barrier_obb.ipynb`.
+Reproduce the comparison from the command line with runs `B3aabb`, `B3obb`,
+`B4aabb` and `B4obb` in `configs/runs.yaml` (build the data first with
+`python -m data.barrier_obb`). The conclusion is applied in
+`notebooks/task2b_oriented.ipynb`, which builds all three classes with oriented
+labels and trains `B5obb`.
 
 ## Running it
 
