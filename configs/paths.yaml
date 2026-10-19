@@ -13,16 +13,19 @@ nuscenes_dest: datasets/nuscenes      # where fetch_nuscenes extracts to
 coco_root: null
 download_coco: true
 
-# Scenes held out as val. Not the devkit's mini_val, which has no barriers at
-# all. Two constraints fight here: every class must appear in val, and training
-# must see each class in more than one scene. Barriers live in only two
-# substantial scenes (989 in scene-0061, 584 in scene-0553), so holding out the
-# larger one leaves the model with barriers from a single scene - it then scores
-# ~0 on anything else, which is exactly what happened. Holding out the smallest
-# scene that still has a usable count keeps both big scenes in training.
-# Val is small as a result (43 cones, 47 barriers); that is the trade, and the
-# Task 1 notebook recomputes it from the data rather than trusting these names.
-val_scenes: [scene-0655, scene-0553]
+# Scenes held out as val. Not the devkit's mini_val, which has no barriers.
+#
+# Barriers exist in only two substantial scenes - 989 boxes in scene-0061 and
+# 584 in scene-0553 - so holding out either one leaves the model training on a
+# single scene's barriers. Measured with val 0655 + 0553: the detector emits 535
+# barrier predictions on the held-out scene and lands none of them, AP50 0.000,
+# confirmed by ultralytics' own validator. Cones generalise because they come
+# from four scenes.
+#
+# So the barrier hold-out is scene-1077 (47 boxes, small but measurable) and
+# both major scenes stay in training. The cone hold-out stays scene-0655, which
+# has scored 0.68-0.71 across three runs.
+val_scenes: [scene-0655, scene-1077]
 
 # ------------------------------------------------------------ Task 1 output
 # The merged 3-class YOLO dataset that everything downstream reads.
