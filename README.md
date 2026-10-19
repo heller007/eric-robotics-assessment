@@ -28,7 +28,7 @@ starts. Every task has one Kaggle notebook and one set of modules.
 | --- | --- | --- | --- | --- |
 | 1 | **Data pipeline** - nuScenes -> YOLO, COCO stop signs, pseudo-labels, merge, sanity checks | `notebooks/task1_data_pipeline.ipynb` | `data/` | done |
 | 2 | **Detection** - B0 zero-shot baseline, fine-tune B1 / B1b / B2, per-class eval | `notebooks/task2_detection.ipynb` | `detection/`, `eval/det_eval.py` | done |
-| 3 | **Distance** - fit priors, D0 pinhole, D1 ground plane, fusion, correction, eval by range bin | `notebooks/task3_distance.ipynb` | `distance/` , `eval/dist_eval.py` | next |
+| 3 | **Distance** - fit priors, D0 pinhole, D1 ground plane, fusion, correction, eval by range bin | `notebooks/task3_distance.ipynb` | `distance/`, `eval/dist_eval.py` | done |
 | 4 | **Edge optimisation** - ONNX / OpenVINO / TensorRT exports, INT8, pruning, benchmarks | `notebooks/task4_optimize.ipynb` | `optimize/`, `eval/benchmark.py` | planned |
 | 5 | **Integration** - threaded realtime app, ByteTrack + Kalman on Z, demo video, results tables | `notebooks/task5_integration.ipynb` | `app/`, `tracking/`, `results/` | planned |
 
@@ -125,7 +125,7 @@ depth** (0-10, 10-20, 20-40, 40+ m). That last table is the one that shows
 whether far cones are being found at all, and it is what justifies spending
 compute on input size or a P2 head.
 
-### Task 3 - distance (next)
+### Task 3 - distance (done)
 
 - **D0, known size (pinhole):** `Z = f_y * H_eff / h_px`, and `Z = f_x * W / w_px`
   for stop signs, whose bottom is often cut off by the pole.
@@ -137,7 +137,14 @@ compute on input size or a P2 head.
 - **D2, Depth Anything V2** as an offline comparison only; it stays out of the
   realtime path.
 
-### Task 4 - edge optimisation
+Evaluated twice: on oracle boxes, which measures the geometry with the detector
+out of the picture and therefore works for every class including barriers, and
+on predicted boxes matched at IoU 0.5 and scored on true positives only - a miss
+is a detection failure, counted in Task 2, and folding it in here would hide
+which half is at fault. Reported per class and per range bin for each stage
+separately, since D0 and D1 fail in opposite directions.
+
+### Task 4 - edge optimisation (next)
 
 ONNX FP32, OpenVINO FP32/INT8, TensorRT FP16/INT8, an input-size sweep, structured
 pruning with DepGraph, and `n` vs `s` backbones - each benchmarked with 20 warmup
@@ -316,10 +323,10 @@ common/      config, dataset discovery, doctor, image staging, label loading, dr
 data/        prepare.py, fetch_nuscenes.py, fetch_dataset.py, nuscenes_to_yolo.py,
              coco_stopsign.py, pseudo_label.py, merge.py, balance.py, sanity_check.py
 detection/   train.py, infer.py
-distance/    pinhole.py, ground_plane.py, fusion.py, fit_priors.py, depth_model.py
+distance/    geometry.py (D0, D1, fusion, correction), fit_priors.py
 tracking/    kalman_z.py
 optimize/    export.py, prune.py
-eval/        det_eval.py, dist_eval.py, benchmark.py
+eval/        det_eval.py, dist_eval.py, depth_coverage.py, benchmark.py
 app/         realtime.py
 tests/       unit tests for the metric and config logic
 notebooks/   one per task
