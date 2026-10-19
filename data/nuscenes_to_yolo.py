@@ -39,7 +39,7 @@ IMG_W, IMG_H = 1600, 900
 MIN_BOX_PX = 4
 MIN_VISIBILITY = 2  # devkit levels 1..4; 2 means at least 40% visible
 DEDUP_COVER = 0.7   # drop a box this much inside a bigger one of the same class
-MERGE_IOU = 0.15    # overlap at which two boxes of a mergeable class are one object
+MERGE_GAP = 40      # px of slack: boxes this close count as one structure
 MERGE_CLASSES = {1}  # barrier: a roadside row is one visual structure, not six
 
 
@@ -103,17 +103,24 @@ def suppress_covered(objects: list[dict], cover: float) -> tuple[list[dict], int
     return kept, len(objects) - len(kept)
 
 
-def iou(a: list[float], b: list[float]) -> float:
-    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
-    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
-    area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
-    union = area_a + area_b - inter
-    return inter / union if union > 0 else 0.0
+def touches(a: list[float], b: list[float], gap: float) -> bool:
+    """Do the two boxes overlap, or sit within `gap` pixels of each other?
+
+    Overlap alone is the wrong test. A row of barriers running across the view
+    is a line of boxes standing side by side, each barely touching its
+    neighbour, so their IoU is near zero while visually they are one fence.
+    Allowing a gap catches both arrangements - the stacked case when the row
+    recedes from the camera, and the adjacent case when it crosses the frame.
+    """
+    return (
+        a[0] - gap <= b[2]
+        and b[0] - gap <= a[2]
+        and a[1] - gap <= b[3]
+        and b[1] - gap <= a[3]
+    )
 
 
-def merge_rows(objects: list[dict], iou_thr: float, classes: set[int]) -> tuple[list[dict], int]:
+def merge_rows(objects: list[dict], gap: float, classes: set[int]) -> tuple[list[dict], int]:
     """Merge overlapping boxes of one class into a box per visual structure.
 
     nuScenes annotates each barrier segment separately, so a roadside row of six
@@ -131,7 +138,7 @@ def merge_rows(objects: list[dict], iou_thr: float, classes: set[int]) -> tuple[
     bias is what fitting H_eff absorbs, and the per-segment depths are kept in
     the sidecar so the geometry can still be checked per object.
     """
-    if iou_thr <= 0 or len(objects) < 2:
+    if gap < 0 or len(objects) < 2:
         return objects, 0
 
     groups: list[list[dict]] = []
@@ -143,7 +150,7 @@ def merge_rows(objects: list[dict], iou_thr: float, classes: set[int]) -> tuple[
         for group in groups:
             if group[0]["cls"] != obj["cls"]:
                 continue
-            if any(iou(obj["box"], other["box"]) > iou_thr for other in group):
+            if any(touches(obj["box"], other["box"], gap) for other in group):
                 hit = group
                 break
         if hit is None:
@@ -203,7 +210,7 @@ def convert(
     link_mode: str = "auto",
     val_scenes: list[str] | None = None,
     dedup_cover: float = DEDUP_COVER,
-    merge_iou: float = MERGE_IOU,
+    merge_gap: float = MERGE_GAP,
 ) -> dict:
     from nuscenes.nuscenes import NuScenes
     from nuscenes.utils.geometry_utils import BoxVisibility, view_points
@@ -292,7 +299,7 @@ def convert(
                     )
                 meta_objs, duplicates = suppress_covered(meta_objs, dedup_cover)
                 stats["dropped"]["duplicate_overlap"] += duplicates
-                meta_objs, merged = merge_rows(meta_objs, merge_iou, MERGE_CLASSES)
+                meta_objs, merged = merge_rows(meta_objs, merge_gap, MERGE_CLASSES)
                 stats["dropped"]["merged_into_row"] += merged
                 lines = []
                 for obj in meta_objs:
@@ -369,11 +376,12 @@ def main() -> None:
         "box of the same class; 0 keeps every annotation",
     )
     ap.add_argument(
-        "--merge-iou",
+        "--merge-gap",
         type=float,
-        default=MERGE_IOU,
-        help="overlap at which neighbouring boxes of a mergeable class become one "
-        "object (barriers only); 0 keeps every segment separate",
+        default=MERGE_GAP,
+        help="pixels of slack when joining boxes of a mergeable class into one "
+        "structure (barriers only); a row of barriers side by side has almost no "
+        "overlap, so a gap is what catches it. Negative keeps every segment.",
     )
     ap.add_argument(
         "--link-mode",
@@ -400,7 +408,7 @@ def main() -> None:
         args.link_mode,
         val_scenes,
         args.dedup_cover,
-        args.merge_iou,
+        args.merge_gap,
     )
     print(summarise(stats))
 

@@ -59,12 +59,15 @@ Three details that decide whether the rest works:
 **A row of barriers is one label, not six.** nuScenes annotates every barrier
 segment separately, so a roadside row projects to five or six boxes standing
 side by side. In the image that row is one continuous object and a detector
-predicts one box for it - the right answer, scored as five misses. Trained
-against the raw labels, barrier AP50 was 0.000 with zero recall in every range
-bin, on more training instances than cones: YOLO26 is NMS-free and assigns one
+predicts one box for it - the right answer, scored as five misses. Overlap is the wrong test for joining them: a row running
+across the view is a line of boxes side by side whose IoU is near zero, while a
+row receding from the camera is a stack whose IoU is high. Proximity catches
+both. Trained against the raw labels, barrier AP50 was 0.000 with zero recall in
+every range bin, on more training instances than cones: YOLO26 is NMS-free and assigns one
 prediction per ground-truth box, so the duplicates are contradictory targets
-rather than hard ones. The converter merges overlapping barrier boxes into one
-per visual structure and keeps the nearest segment's depth, which is also the
+rather than hard ones. The converter merges barrier boxes that touch or sit within
+`--merge-gap` pixels of each other into one per visual structure, and keeps the
+nearest segment's depth, which is also the
 useful quantity ("a barrier starts 9 m ahead"). The merged box's bottom edge is
 still that segment's contact point, so the ground-plane distance estimate stays
 exact; the pinhole estimate reads slightly tall because the top edge comes from

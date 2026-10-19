@@ -13,7 +13,7 @@ try:
     from data.nuscenes_to_yolo import (
         DEDUP_COVER,
         MERGE_CLASSES,
-        MERGE_IOU,
+        MERGE_GAP,
         covered_fraction,
         merge_rows,
         suppress_covered,
@@ -92,15 +92,15 @@ def test_zero_cover_disables_it():
 
 def test_a_row_merges_into_one_box():
     row = receding_row(6)
-    merged, dropped = merge_rows(row, MERGE_IOU, MERGE_CLASSES)
+    merged, dropped = merge_rows(row, MERGE_GAP, MERGE_CLASSES)
     assert len(merged) == 1 and dropped == 5
     # chained through neighbours: the ends do not overlap each other directly
-    assert merge_rows(row[:1] + row[-1:], MERGE_IOU, MERGE_CLASSES)[1] == 0
+    assert merge_rows(row[:1] + row[-1:], MERGE_GAP, MERGE_CLASSES)[1] == 0
 
 
 def test_merged_box_keeps_the_nearest_depth_and_contact_point():
     row = receding_row(6)
-    merged = merge_rows(row, MERGE_IOU, MERGE_CLASSES)[0][0]
+    merged = merge_rows(row, MERGE_GAP, MERGE_CLASSES)[0][0]
     assert merged["z"] == min(o["z"] for o in row)
     # the bottom edge is still the nearest segment's contact point, so the
     # ground-plane distance estimate stays exact
@@ -112,19 +112,41 @@ def test_merged_box_keeps_the_nearest_depth_and_contact_point():
 
 def test_a_barrier_across_the_road_stays_separate():
     objs = receding_row(3) + [box(1, 1300, 440, 1360, 480, z=35.0)]
-    merged, _ = merge_rows(objs, MERGE_IOU, MERGE_CLASSES)
+    merged, _ = merge_rows(objs, MERGE_GAP, MERGE_CLASSES)
     assert len(merged) == 2
 
 
 def test_cones_are_never_merged():
     """Cones are discrete objects; only barriers form a continuous structure."""
     cones = [box(0, 100, 500, 200, 640, z=9.0), box(0, 150, 505, 250, 635, z=10.0)]
-    assert merge_rows(cones, MERGE_IOU, MERGE_CLASSES) == (cones, 0)
+    assert merge_rows(cones, MERGE_GAP, MERGE_CLASSES) == (cones, 0)
 
 
-def test_zero_iou_disables_merging():
+def test_a_row_across_the_view_merges_even_without_overlap():
+    """Side by side with small gaps - the case IoU-based merging missed."""
+    row = [box(1, 100 + 210 * i, 500, 290 + 210 * i, 610, z=12.0 + i) for i in range(5)]
+    assert all(
+        row[i]["box"][2] < row[i + 1]["box"][0] for i in range(4)
+    ), "these must not overlap at all"
+    merged, dropped = merge_rows(row, MERGE_GAP, MERGE_CLASSES)
+    assert len(merged) == 1 and dropped == 4
+    assert merged[0]["box"] == [100, 500, 1130, 610]
+
+
+def test_a_wide_gap_is_not_one_structure():
+    objs = [box(1, 100, 500, 290, 610, z=12.0), box(1, 900, 500, 1090, 610, z=13.0)]
+    assert merge_rows(objs, MERGE_GAP, MERGE_CLASSES)[1] == 0
+
+
+def test_vertical_separation_is_not_one_structure():
+    """Same column, far apart vertically - not a row."""
+    objs = [box(1, 100, 100, 290, 200, z=30.0), box(1, 100, 500, 290, 610, z=10.0)]
+    assert merge_rows(objs, MERGE_GAP, MERGE_CLASSES)[1] == 0
+
+
+def test_negative_gap_disables_merging():
     row = receding_row(4)
-    assert merge_rows(row, 0.0, MERGE_CLASSES) == (row, 0)
+    assert merge_rows(row, -1, MERGE_CLASSES) == (row, 0)
 
 
 if __name__ == "__main__":
