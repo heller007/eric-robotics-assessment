@@ -13,14 +13,16 @@ nuscenes_dest: datasets/nuscenes      # where fetch_nuscenes extracts to
 coco_root: null
 download_coco: true
 
-# Scenes held out as val. The devkit's own mini_val (scene-0103, scene-0916)
-# contains no barrier annotations at all, so barrier AP cannot be measured on it
-# - which makes "beat the baseline on every class" impossible to report. This
-# pair puts 218 cones and 584 barriers in val and keeps the richest scene
-# (0061, 501 cones + 989 barriers) for training. Barriers are concentrated in
-# just two scenes, so there is no split that is both balanced and 20%.
-# Set to null to use the devkit split instead.
-val_scenes: [scene-0655, scene-0553]
+# Scenes held out as val. Not the devkit's mini_val, which has no barriers at
+# all. Two constraints fight here: every class must appear in val, and training
+# must see each class in more than one scene. Barriers live in only two
+# substantial scenes (989 in scene-0061, 584 in scene-0553), so holding out the
+# larger one leaves the model with barriers from a single scene - it then scores
+# ~0 on anything else, which is exactly what happened. Holding out the smallest
+# scene that still has a usable count keeps both big scenes in training.
+# Val is small as a result (43 cones, 47 barriers); that is the trade, and the
+# Task 1 notebook recomputes it from the data rather than trusting these names.
+val_scenes: [scene-0103, scene-1077]
 
 # ------------------------------------------------------------ Task 1 output
 # The merged 3-class YOLO dataset that everything downstream reads.
