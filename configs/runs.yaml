@@ -97,3 +97,24 @@ runs:
     data: configs/barrier_obb.yaml
     freeze: 0
     imgsz: 640
+
+  # ---- the last diagnostic: can the detector learn barriers at all? ----
+  # Frame-level split, which LEAKS - keyframes 0.5 s apart show the same
+  # barriers - so these numbers are not a generalisation claim and must never be
+  # reported as one. They separate "cannot learn barriers" from "cannot
+  # generalise to an unseen scene", which is the open question after merged
+  # labels, oriented boxes and a single-class setup all changed nothing.
+  # Run: python -m data.barrier_obb --split-mode frame --tag frame
+  B4aabb:
+    purpose: "barrier only, frame split, axis-aligned - learnability check (leaks)"
+    models: [yolo11n.pt]
+    data: configs/barrier_frame_aabb.yaml
+    freeze: 0
+    imgsz: 640
+
+  B4obb:
+    purpose: "barrier only, frame split, oriented - learnability check (leaks)"
+    models: [yolo11n-obb.pt]
+    data: configs/barrier_frame_obb.yaml
+    freeze: 0
+    imgsz: 640

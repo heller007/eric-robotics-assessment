@@ -107,7 +107,15 @@ def obb_line(corners: np.ndarray) -> str | None:
     return "0 " + " ".join(f"{v:.6f}" for v in quad.reshape(-1))
 
 
-def build(dataroot: Path, out_aabb: Path, out_obb: Path, val_scenes, gap: float) -> dict:
+def build(
+    dataroot: Path,
+    out_aabb: Path,
+    out_obb: Path,
+    val_scenes,
+    gap: float,
+    split_mode: str = "scene",
+    frame_stride: int = 5,
+) -> dict:
     from nuscenes.nuscenes import NuScenes
     from nuscenes.utils.geometry_utils import BoxVisibility, view_points
     from nuscenes.utils.splits import create_splits_scenes
@@ -122,10 +130,22 @@ def build(dataroot: Path, out_aabb: Path, out_obb: Path, val_scenes, gap: float)
     stats = Counter()
 
     for scene in tqdm(nusc.scene, desc="scenes"):
-        split = "val" if scene["name"] in val_scenes else "train"
+        scene_split = "val" if scene["name"] in val_scenes else "train"
         token = scene["first_sample_token"]
+        frame = 0
         while token:
             sample = nusc.get("sample", token)
+            # scene mode holds whole scenes out, which is the honest protocol but
+            # on this dataset means testing barriers on a scene with no analogue
+            # in training. frame mode interleaves instead: it leaks, because
+            # keyframes 0.5 s apart show the same objects, so it cannot support a
+            # generalisation claim - it answers only whether the detector can
+            # learn the class at all.
+            if split_mode == "frame":
+                split = "val" if frame % frame_stride == 0 else "train"
+            else:
+                split = scene_split
+            frame += 1
             for cam in CAMS:
                 if cam not in sample["data"]:
                     continue
@@ -207,17 +227,33 @@ def main() -> None:
     ap.add_argument("--out", default=None, help="base path; _aabb and _obb are appended")
     ap.add_argument("--val-scenes", nargs="*", default=None)
     ap.add_argument("--merge-gap", type=float, default=MERGE_GAP)
+    ap.add_argument(
+        "--split-mode",
+        choices=["scene", "frame"],
+        default="scene",
+        help="scene: hold whole scenes out (honest). frame: every Nth frame, "
+        "which leaks and proves only that the class is learnable.",
+    )
+    ap.add_argument("--frame-stride", type=int, default=5)
+    ap.add_argument("--tag", default="", help="suffix for the dataset and config names")
     args = ap.parse_args()
 
     paths = load_paths()
     root = find_nuscenes_root(args.nuscenes_root or paths.get("nuscenes_root"))
-    base = resolve(args.out) if args.out else writable_root() / "datasets" / "barrier"
+    tag = f"_{args.tag}" if args.tag else ""
+    base = resolve(args.out) if args.out else writable_root() / "datasets" / f"barrier{tag}"
     out_aabb, out_obb = Path(f"{base}_aabb"), Path(f"{base}_obb")
     val_scenes = args.val_scenes or paths.get("val_scenes")
 
     print(f"nuScenes : {root}")
-    print(f"val      : {', '.join(val_scenes)}")
-    stats = build(root, out_aabb, out_obb, val_scenes, args.merge_gap)
+    if args.split_mode == "frame":
+        print(f"val      : every {args.frame_stride}th frame of every scene (leaks)")
+    else:
+        print(f"val      : {', '.join(val_scenes)}")
+    stats = build(
+        root, out_aabb, out_obb, val_scenes, args.merge_gap,
+        args.split_mode, args.frame_stride,
+    )
 
     for split in ("train", "val"):
         print(
@@ -235,7 +271,7 @@ def main() -> None:
             "val": str((root_dir / "images" / "val").resolve()).replace("\\", "/"),
             "names": {0: "barrier"},
         }
-        dest = save_yaml(cfg, CONFIG_DIR / f"barrier_{kind}.yaml")
+        dest = save_yaml(cfg, CONFIG_DIR / f"barrier{tag}_{kind}.yaml")
         print(f"wrote {dest}")
 
     print("\nnext: train B3aabb and B3obb from the barrier notebook")
