@@ -118,3 +118,16 @@ runs:
     data: configs/barrier_frame_obb.yaml
     freeze: 0
     imgsz: 640
+
+  # ---- the 3-class oriented variant ----
+  # Scored against the axis-aligned runs, NOT against a floor: there is no
+  # COCO-pretrained OBB model, since DOTA has no stop sign class, so B0 has no
+  # OBB counterpart. Cones come out near axis-aligned, which is the honest
+  # result for an upright object; the gain is expected on barriers alone.
+  # Run: python -m data.obb_dataset
+  B5obb:
+    purpose: "all three classes, oriented boxes"
+    models: [yolo11n-obb.pt]
+    data: configs/data_obb.yaml
+    freeze: 0
+    imgsz: 640
