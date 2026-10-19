@@ -159,6 +159,69 @@ detection, vectorised distance, ByteTrack with a 1-D constant-velocity Kalman
 filter on `Z`, and the annotated output. Then the results tables, the accuracy vs
 speed plot with the 30 FPS line marked, and the demo video.
 
+## Barrier investigation
+
+Barriers would not train: AP50 0.000 on the held-out scene, on more training
+instances than cones, while the same pipeline reached 0.71 on cones and 0.85 on
+stop signs. Six things were varied to find out why.
+
+| change | barrier AP50 |
+| --- | --- |
+| raw per-segment labels | 0.000 |
+| duplicate containment suppressed | 0.094 |
+| rows merged into one box per structure | 0.000 |
+| single class, no competition (`B3aabb`) | 0.037 |
+| oriented boxes (`B3obb`) | 0.015 |
+| **frame-level split, axis-aligned (`B4aabb`)** | **0.789** |
+| **frame-level split, oriented (`B4obb`)** | **0.890** |
+
+The last two rows settle it. A frame-level split leaks by construction -
+keyframes are 0.5 s apart and show the same barrier - so those numbers are an
+upper bound, not a generalisation result. But they answer the question that
+mattered: **the detector learns barriers fine** (P 0.91, R 0.85). What it cannot
+do is transfer to a scene it has never seen.
+
+**Why that is structural, not fixable here.** nuScenes-mini has barriers in two
+substantial scenes, 989 boxes in scene-0061 and 584 in scene-0553, with 48
+across all the others. Any scene-level hold-out therefore trains on essentially
+one scene and tests on a different one. Cones generalise because they appear in
+four scenes; stop signs generalise because they come from COCO, thousands of
+images across every condition. The per-scene counts are printed by
+`data/sanity_check.py` and the split is recorded in `configs/paths.yaml`.
+
+**What would fix it:** barrier data from more scenes. nuImages v1.0-mini carries
+`movable_object.barrier` 2D boxes on different frames and is the obvious source -
+though it has no 3D boxes, so it would improve detection while contributing
+nothing to distance ground truth.
+
+### Oriented boxes are the better primitive for this class
+
+Visible only once the dataset stops being the bottleneck, which is why the
+scene-split comparison missed it:
+
+| | mAP50 | mAP50-95 | inference | GFLOPs |
+| --- | --- | --- | --- | --- |
+| axis-aligned | 0.789 | 0.553 | 2.1 ms | 6.4 |
+| oriented | **0.890** | **0.711** | **1.9 ms** | 6.6 |
+
++0.10 mAP50 and +0.16 mAP50-95 for no latency cost. The reason is geometric: a
+roadside row receding from the camera is a long thin diagonal shape, and an
+axis-aligned box around it is roughly **55% object, 45% empty road** (measured on
+a synthetic row), which caps IoU even for a correct prediction.
+
+It would also improve distance, which is the part worth carrying forward: the
+oriented box's **short side** is the barrier's height in pixels regardless of how
+far the row recedes - exactly the inflation that `H_eff` is currently fitted to
+absorb - and its lowest **vertex** is a truer ground-contact point than the
+bottom edge of an axis-aligned box.
+
+Labels cost nothing to produce: the converter already projects 8 cuboid corners
+per barrier, so `cv2.minAreaRect` over a structure's corners gives the rotated
+rectangle directly. That is what ruled segmentation out by comparison - masks
+would need a second dataset (nuImages), and that dataset has no depth.
+
+Reproduce both with `notebooks/task2b_barrier_obb.ipynb`.
+
 ## Running it
 
 Work happens in a local checkout; **git carries the code, not the data**. The

@@ -1,0 +1,6 @@
+run,split,labels,model,mAP50,mAP50-95,precision,recall,inference_ms,gflops,note
+B1,scene,3-class merged,yolo26n,,,,,,,barrier AP50 0.000 with 535 predictions
+B3aabb,scene,barrier only axis-aligned,yolo11n,0.037,0.010,,,,,control
+B3obb,scene,barrier only oriented,yolo11n-obb,0.015,0.009,,,,,oriented
+B4aabb,frame,barrier only axis-aligned,yolo11n,0.789,0.553,0.872,0.623,2.1,6.4,leaks - learnability check only
+B4obb,frame,barrier only oriented,yolo11n-obb,0.890,0.711,0.909,0.845,1.9,6.6,leaks - learnability check only
